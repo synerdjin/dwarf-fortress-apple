@@ -56,6 +56,55 @@ func registerFixedTests() {
       expect(Fixed(12) / 4 == Fixed(3))
     }
 
+    test("Every operator truncates toward zero") {
+      // 1/3 is not representable, so each of these has bits to discard. The
+      // point is the *direction*: toward zero on both sides of the origin, so
+      // no operator is the odd one out. `*` used an arithmetic shift here,
+      // which floors, and was the odd one out.
+      expect(Fixed(1, over: 3).raw == 21845)
+      expect(Fixed(-1, over: 3).raw == -21845)
+
+      let third = Fixed(1, over: 3)
+      expect((third * third).raw == 7281)  // floor would give 7281 too...
+      // ...so use a product whose exact value is negative and inexact, where
+      // floor and truncation actually disagree.
+      expect((-third * third).raw == -7281)
+      expect((third * -third).raw == -7281)
+
+      expect((Fixed(1) / Fixed(3)).raw == 21845)
+      expect((Fixed(-1) / Fixed(3)).raw == -21845)
+      expect((Fixed(1) / -3).raw == -21845)
+    }
+
+    test("Negation is exact through multiply and divide") {
+      // The identity a diffusion kernel needs in order to conserve: flux
+      // computed from (a - b) must be the exact negative of flux computed from
+      // (b - a). Under floor rounding these differ by one epsilon whenever the
+      // product is inexact, and the pair leaks a fraction of a unit per tick
+      // forever.
+      let rate = Fixed(1, over: 3)
+      var mismatches = 0
+      for a in stride(from: -2000, through: 2000, by: 37) {
+        for b in stride(from: -300, through: 300, by: 53) {
+          let difference = Fixed(raw: Int32(a)) - Fixed(raw: Int32(b))
+          let reverse = Fixed(raw: Int32(b)) - Fixed(raw: Int32(a))
+          if difference * rate != -(reverse * rate) { mismatches += 1 }
+          if difference / rate != -(reverse / rate) { mismatches += 1 }
+          if difference / 7 != -(reverse / 7) { mismatches += 1 }
+        }
+      }
+      expectEqual(mismatches, 0, "negation is not exact through the operators")
+    }
+
+    test("rounded traps rather than wrapping past Int32.max") {
+      // Not directly testable without crashing the harness -- this pins the
+      // boundary that is still safe, and the `+` in `rounded` (previously `&+`)
+      // is what makes the next step a trap instead of a sign flip.
+      // Fixed.max.raw + 32768 would wrap to a large negative under `&+`.
+      expect(Fixed(raw: Int32.max - (1 << 15)).rounded == 32767)
+      expect(Fixed(raw: Int32.min + (1 << 15)).rounded == -32767)
+    }
+
     test("floor rounds toward negative infinity, not toward zero") {
       // Truncation toward zero would make the origin tile two units wide,
       // which quietly breaks every coordinate conversion that follows.

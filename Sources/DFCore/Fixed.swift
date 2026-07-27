@@ -12,6 +12,23 @@
 /// Products and quotients are computed in `Int64` and trap on overflow rather
 /// than wrapping. A silently wrapped flow rate is a fortress that desynchronises
 /// from its own replay an hour later; a trap is a stack trace.
+///
+/// **Rounding convention: every operator truncates toward zero.** `*`, `/`, and
+/// `init(_:over:)` all discard the bits below one epsilon in the direction of
+/// zero, which is what makes negation exact:
+///
+///     (a - b) * k  ==  -((b - a) * k)
+///
+/// That identity is not decoration. A diffusion kernel computes flux between
+/// two cells from their difference; if negating the difference does not negate
+/// the flux, the pair exchanges a fraction of an epsilon per tick in one
+/// direction and the field stops conserving. Floor-toward-negative-infinity
+/// rounding -- which `*` used before -- breaks the identity, because
+/// `-floor(-x)` is `ceil(x)`, not `floor(x)`.
+///
+/// The `floor` and `fraction` accessors are the deliberate exception: they name
+/// their rounding in their own names and exist for tile-coordinate math, where
+/// truncating toward zero would make the origin tile two units wide.
 public struct Fixed: Hashable, Sendable, BitwiseCopyable {
   /// The underlying Q16.16 value. Public for serialization and hashing only --
   /// arithmetic should go through the operators.
@@ -36,8 +53,12 @@ public struct Fixed: Hashable, Sendable, BitwiseCopyable {
     self.raw = Int32(scaled)
   }
 
-  /// Exact rational construction, e.g. `Fixed(1, over: 3)`. This is how
-  /// fractional constants enter the sim -- never by way of a float literal.
+  /// Rational construction, e.g. `Fixed(1, over: 3)`. This is how fractional
+  /// constants enter the sim -- never by way of a float literal.
+  ///
+  /// Exact when the ratio is representable in Q16.16; otherwise it truncates
+  /// toward zero, so `Fixed(-1, over: 3) == -Fixed(1, over: 3)` holds, matching
+  /// the operators' convention.
   @inlinable
   public init(_ numerator: Int, over denominator: Int) {
     precondition(denominator != 0, "Fixed division by zero")
@@ -67,9 +88,17 @@ public struct Fixed: Hashable, Sendable, BitwiseCopyable {
   }
 
   /// Nearest integer, halves rounding toward positive infinity.
+  ///
+  /// Like `floor`, this is a named accessor whose rounding is part of its
+  /// contract, so it does not follow the operators' truncate-toward-zero rule.
+  /// It is `floor(self + 1/2)`, and the bias is stated rather than hidden.
+  ///
+  /// The add is checked, not wrapping: for `raw` within half an epsilon of
+  /// `Int32.max` there is no correct answer, and the type's whole contract is
+  /// that it traps instead of producing a wrong one.
   @inlinable
   public var rounded: Int32 {
-    (raw &+ (1 << (Fixed.fractionalBits - 1))) >> Fixed.fractionalBits
+    (raw + (1 << (Fixed.fractionalBits - 1))) >> Fixed.fractionalBits
   }
 
   /// The fractional part, always in `[0, 1)` even for negative values.
@@ -104,11 +133,16 @@ extension Fixed: AdditiveArithmetic {
 }
 
 extension Fixed {
-  /// Widened multiply then shift. The `Int64` intermediate is what keeps
+  /// Widened multiply then rescale. The `Int64` intermediate is what keeps
   /// products of mid-range values exact instead of overflowing at ±181.
+  ///
+  /// The rescale divides rather than shifting. An arithmetic shift right floors
+  /// toward negative infinity, which would make this the one operator that
+  /// rounds in a different direction from `/` and `init(_:over:)` -- see the
+  /// type's rounding convention above for why that costs conservation.
   @inlinable
   public static func * (lhs: Fixed, rhs: Fixed) -> Fixed {
-    let product = (Int64(lhs.raw) * Int64(rhs.raw)) >> Fixed.fractionalBits
+    let product = (Int64(lhs.raw) * Int64(rhs.raw)) / Fixed.scale
     precondition(
       product >= Int64(Int32.min) && product <= Int64(Int32.max),
       "Fixed multiply overflow"
@@ -145,7 +179,14 @@ extension Fixed {
   @inlinable
   public static func / (lhs: Fixed, rhs: Int) -> Fixed {
     precondition(rhs != 0, "Fixed division by zero")
-    return Fixed(raw: Int32(Int64(lhs.raw) / Int64(rhs)))
+    let quotient = Int64(lhs.raw) / Int64(rhs)
+    // Reachable only at `Fixed.min / -1`, but a generic `Int32.init` trap tells
+    // the next agent nothing about which operation produced it.
+    precondition(
+      quotient >= Int64(Int32.min) && quotient <= Int64(Int32.max),
+      "Fixed divide overflow"
+    )
+    return Fixed(raw: Int32(quotient))
   }
 
   @inlinable
