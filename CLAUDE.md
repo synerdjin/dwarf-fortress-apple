@@ -82,6 +82,10 @@ Three naming systems coexist; keep them consistent per milestone:
   than a heisenbug three milestones later.
 - Hot paths use `UnsafeMutableBufferPointer` and avoid bounds-checked subscripts.
   Do **not** reach for `-Ounchecked` to paper over this; fix the code.
+- **Apple Silicon cache lines are 128 bytes, not 64.** Struct-of-arrays layouts
+  and alignment padding copied from x86 guidance are tuned to half the real
+  line, so a "cache-line-aligned" 64-byte stride shares a line with its
+  neighbour and gets none of the isolation it was written for.
 - Tests are named for the spec they verify (`testSPEC_M3_PATHS_flowFieldMatchesBFS`).
 
 ## Working agreement
