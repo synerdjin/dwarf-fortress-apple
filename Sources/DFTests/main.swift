@@ -14,6 +14,7 @@ registerECSTests()
 registerListStorageTests()
 registerMapStoreTests()
 registerRenderTests()
+registerUITests()
 
 // `dftest Fixed` runs only matching suites and tests.
 // `dftest --max-skips 0` fails the run if any test skipped; the merge gate uses
