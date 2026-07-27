@@ -65,15 +65,30 @@ recorded rather than quietly absorbed:
    dirty-flag consultation anywhere.
 
 2. **PC-002 therefore holds at one viewport and fails at another.** Measured on
-   an Apple M4, 4 layers, `--with-snapshot` against the same run without:
+   an Apple M4, 5 layers (`depthLayers + 1`), `--with-snapshot` against the
+   same run without. Both viewports fit inside their map, so this is all real
+   in-map work with nothing hidden behind a clamp:
 
    | viewport | total ms/tick | baseline | snapshot delta | PC-002 (< 1 ms) |
    |---|---|---|---|---|
-   | 144×144 (200-dwarves, camera clamped to map) | 1.014 | 0.095 | 0.92 | passes |
-   | 300×200 (render-300x200, PC-001's own scale) | 2.779 | 0.301 | 2.48 | **fails, 2.5×** |
+   | 144×144 (200-dwarves) | 0.963 | 0.094 | 0.868 | passes |
+   | 300×200 (render-300x200, PC-001's own scale) | 2.590 | 0.298 | 2.292 | **fails, 2.3×** |
 
-   So a window at the size PC-001 names costs 2.5× what PC-002 permits. The two
+   So a window at the size PC-001 names costs 2.3× what PC-002 permits. The two
    requirements are not jointly satisfiable with a full rebuild per tick.
+
+   Two corrections to earlier figures, both found in review and both recorded
+   because the first was reported before it was checked:
+   - An earlier version of the bench clamped its camera to the map with an
+     inline `min()`, on a comment claiming parity with `CameraController`.
+     That claim is false — the controller clamps the camera's *origin* but
+     never its *size* — so the gate was measuring a camera the shipped window
+     never produces and excluding the overhang cost a real window pays. The
+     clamp is gone; viewports are chosen to fit their map instead.
+   - `SimulationHost` was allocating a fresh snapshot every tick rather than
+     building into the ring's writer buffer, defeating both mechanisms that
+     exist to avoid exactly that. Fixing it removed ~0.19 ms/tick at 300×200.
+     It did **not** change the conclusion: 2.48 → 2.29 is still 2.3× over.
 
 **Not fixed here, deliberately.** The dirty-flag reuse cannot be built on the
 existing `Block.dirty`: review §4.3 establishes that flag is renderer-owned and

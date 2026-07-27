@@ -133,22 +133,28 @@ public final class TilemapRenderer {
   /// is a torn or flickering frame under load rather than a crash, which is
   /// exactly the kind of defect an agent cannot see.
   ///
-  /// The buffers rotate per `draw`. The contract that makes that sufficient is
-  /// on the caller: **at most `maxFramesInFlight` command buffers may be
-  /// outstanding at once.** `DisplayLoop` holds a semaphore of exactly this
-  /// value; `capture` satisfies it trivially by waiting.
-  private var instanceBuffers: [MTLBuffer?]
-  private var instanceCapacities: [Int]
+  /// The buffers rotate per `draw`, and the rule that makes that sufficient —
+  /// at most `maxFramesInFlight` command buffers outstanding at once — is
+  /// enforced by `makeCommandBuffer()` rather than left to the caller to
+  /// remember. A second caller that forgot would get a torn frame, which the
+  /// paragraph above notes is exactly the kind of defect nobody sees.
+  private var instanceBuffers = [MTLBuffer?](
+    repeating: nil, count: TilemapRenderer.maxFramesInFlight)
   private var frameSlot = 0
 
   /// How many frames may be in flight before a caller must wait.
   public static let maxFramesInFlight = 3
 
+  /// Bounds outstanding command buffers to `maxFramesInFlight`.
+  ///
+  /// Held by the renderer, not the caller, because the invariant it protects
+  /// (instance-buffer rotation) is the renderer's. `capture` never contends on
+  /// it: it waits for completion before returning, so it is always alone.
+  private let inFlight = DispatchSemaphore(value: TilemapRenderer.maxFramesInFlight)
+
   public static let pixelFormat: MTLPixelFormat = .bgra8Unorm
 
   public init(device: MTLDevice? = nil) throws {
-    instanceBuffers = Array(repeating: nil, count: TilemapRenderer.maxFramesInFlight)
-    instanceCapacities = Array(repeating: 0, count: TilemapRenderer.maxFramesInFlight)
     guard let device = device ?? MTLCreateSystemDefaultDevice() else {
       throw RenderError.noDevice
     }
@@ -182,13 +188,25 @@ public final class TilemapRenderer {
     atlas = try GlyphAtlas(device: device)
   }
 
-  /// A command buffer on the renderer's own queue.
+  /// A command buffer on the renderer's own queue, admitted under the
+  /// in-flight limit.
   ///
-  /// `capture` makes its own because it also reads pixels back. A display loop
-  /// needs one it can `present` a drawable with, and sharing the queue is what
-  /// keeps frame ordering well defined.
+  /// **Blocks** while `maxFramesInFlight` buffers from this method are still
+  /// outstanding, and releases its slot from a completion handler attached
+  /// here. That makes the instance-buffer rotation safe by construction: a
+  /// caller cannot encode a frame that would overwrite instances the GPU is
+  /// still reading, because it cannot obtain a buffer to encode it with.
+  ///
+  /// Call this on a thread that may block — not the main thread.
   public func makeCommandBuffer() -> MTLCommandBuffer? {
-    commandQueue.makeCommandBuffer()
+    inFlight.wait()
+    guard let buffer = commandQueue.makeCommandBuffer() else {
+      inFlight.signal()
+      return nil
+    }
+    let semaphore = inFlight
+    buffer.addCompletedHandler { _ in semaphore.signal() }
+    return buffer
   }
 
   /// Encodes the snapshot into `target`.
@@ -217,6 +235,11 @@ public final class TilemapRenderer {
 
     let perLayer = snapshot.camera.tileCount
     // Deepest first so the focused layer overwrites what is beneath it.
+    // Hoisted: neither the buffer nor the offset varies by layer, only
+    // `layerOffset` in the uniforms does.
+    let instances = instanceBuffers[frameSlot]
+    encoder.setVertexBuffer(instances, offset: 0, index: 0)
+
     for layer in 0..<snapshot.layerCount {
       var uniforms = Uniforms(
         columns: UInt32(snapshot.camera.size.x),
@@ -224,7 +247,6 @@ public final class TilemapRenderer {
         glyphCount: UInt32(atlas.glyphCount),
         layerOffset: UInt32(layer * perLayer)
       )
-      encoder.setVertexBuffer(instanceBuffers[frameSlot], offset: 0, index: 0)
       encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
       encoder.drawPrimitives(
         type: .triangleStrip,
@@ -263,7 +285,11 @@ public final class TilemapRenderer {
       throw RenderError.textureCreationFailed("capture target")
     }
 
-    guard let commandBuffer = commandQueue.makeCommandBuffer() else {
+    // Through the same admission control as every other caller, so slot
+    // rotation stays sound even if a capture interleaves with a display loop.
+    // It cannot deadlock: it takes one of `maxFramesInFlight` slots and
+    // releases it via the completion handler the accessor attaches.
+    guard let commandBuffer = makeCommandBuffer() else {
       throw RenderError.encodingFailed("command buffer")
     }
     try draw(snapshot, into: target, commandBuffer: commandBuffer)
@@ -317,7 +343,9 @@ public final class TilemapRenderer {
     let byteCount = instances.count * MemoryLayout<TileInstance>.stride
     guard byteCount > 0 else { return }
 
-    if instanceCapacities[slot] < byteCount || instanceBuffers[slot] == nil {
+    // `nil` reads as capacity 0, and `byteCount > 0` is guaranteed above, so
+    // this one condition covers both "no buffer yet" and "buffer too small".
+    if (instanceBuffers[slot]?.length ?? 0) < byteCount {
       // `.storageModeShared` is the unified-memory payoff: the CPU writes and
       // the GPU reads the same pages, with no staging copy or upload step.
       guard
@@ -326,7 +354,6 @@ public final class TilemapRenderer {
         preconditionFailure("MTLDevice.makeBuffer returned nil for \(byteCount) bytes")
       }
       instanceBuffers[slot] = buffer
-      instanceCapacities[slot] = buffer.length
     }
 
     guard let buffer = instanceBuffers[slot] else {

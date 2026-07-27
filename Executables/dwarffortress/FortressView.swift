@@ -21,16 +21,9 @@ final class FrameDrawer: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendab
   private let renderer: TilemapRenderer
   private let ring: FrameSnapshotRing
 
-  /// Bounds how many frames may be encoded before one completes. Matches the
-  /// renderer's instance-buffer rotation exactly — encoding a fourth frame
-  /// while three are outstanding would reuse a buffer the GPU is still
-  /// reading. See `TilemapRenderer.maxFramesInFlight`.
-  private let inFlight: DispatchSemaphore
-
   init(renderer: TilemapRenderer, ring: FrameSnapshotRing) {
     self.renderer = renderer
     self.ring = ring
-    self.inFlight = DispatchSemaphore(value: TilemapRenderer.maxFramesInFlight)
   }
 
   func metalDisplayLink(
@@ -39,19 +32,18 @@ final class FrameDrawer: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendab
   ) {
     guard let snapshot = ring.latest(), !snapshot.isEmpty else { return }
 
-    inFlight.wait()
-    guard let commandBuffer = renderer.makeCommandBuffer() else {
-      inFlight.signal()
-      return
-    }
-    // Registered before any early return below, so no path can drop a signal
-    // and wedge the loop three frames later.
-    let semaphore = inFlight
-    commandBuffer.addCompletedHandler { _ in semaphore.signal() }
+    // `makeCommandBuffer` blocks until a frame slot is free and releases it on
+    // completion. The in-flight limit lives in the renderer because the thing
+    // it protects — instance-buffer rotation — is the renderer's; this loop no
+    // longer has to remember it. Blocking here is safe only because this
+    // delegate runs on `renderThread`, not on main.
+    guard let commandBuffer = renderer.makeCommandBuffer() else { return }
 
     do {
       try renderer.draw(snapshot, into: update.drawable.texture, commandBuffer: commandBuffer)
     } catch {
+      // Still commit: the slot is released by the completion handler, and an
+      // uncommitted buffer would never fire one.
       commandBuffer.commit()
       return
     }
@@ -72,13 +64,11 @@ final class FortressView: NSView {
   private let drawer: FrameDrawer
   private var controller: CameraController
   private var displayLink: CAMetalDisplayLink?
+  private var renderThread: Thread?
 
-  private var metalLayer: CAMetalLayer {
-    guard let metal = layer as? CAMetalLayer else {
-      preconditionFailure("FortressView's layer must be a CAMetalLayer")
-    }
-    return metal
-  }
+  /// Held rather than re-derived by casting `layer`: this class creates it, so
+  /// the cast could only ever fail if someone reassigned `layer` underneath.
+  private let metalLayer = CAMetalLayer()
 
   init(host: SimulationHost, renderer: TilemapRenderer, controller: CameraController) {
     self.host = host
@@ -87,7 +77,7 @@ final class FortressView: NSView {
     super.init(frame: .zero)
 
     wantsLayer = true
-    layer = CAMetalLayer()
+    layer = metalLayer
     metalLayer.device = renderer.device
     metalLayer.pixelFormat = TilemapRenderer.pixelFormat
     metalLayer.framebufferOnly = true
@@ -104,14 +94,40 @@ final class FortressView: NSView {
 
   // MARK: - Display link
 
+  /// Starts the display link on a dedicated thread.
+  ///
+  /// **Not the main run loop.** `CAMetalDisplayLink` delivers its callback on
+  /// whichever run loop it was added to, and the callback both blocks on the
+  /// renderer's in-flight semaphore and does a multi-megabyte instance copy.
+  /// On `.main` that stalls event handling and live resize whenever the GPU
+  /// falls a frame behind — and it would have quietly falsified `FrameDrawer`'s
+  /// whole threading rationale, which is written assuming it is off main.
   func startDrawing() {
-    let link = CAMetalDisplayLink(metalLayer: metalLayer)
-    link.delegate = drawer
-    link.add(to: .main, forMode: .common)
-    displayLink = link
+    // `CAMetalLayer` is not `Sendable`, but handing it to a display link on
+    // another thread is the documented way to drive one: Core Animation owns
+    // the cross-thread synchronisation for the layer's drawable queue, and
+    // this thread only ever asks the link for drawables. Nothing else touches
+    // the layer from here.
+    nonisolated(unsafe) let layerForLink = metalLayer
+    let thread = Thread { [drawer] in
+      let link = CAMetalDisplayLink(metalLayer: layerForLink)
+      link.delegate = drawer
+      link.add(to: .current, forMode: .common)
+      // The link retains itself in the run loop; this parks the thread until
+      // `invalidate()` lets the run loop drain and return.
+      while !Thread.current.isCancelled,
+        RunLoop.current.run(mode: .common, before: .distantFuture) {}
+      link.invalidate()
+    }
+    thread.name = "render"
+    thread.qualityOfService = .userInteractive
+    thread.start()
+    renderThread = thread
   }
 
   func stopDrawing() {
+    renderThread?.cancel()
+    renderThread = nil
     displayLink?.invalidate()
     displayLink = nil
   }
@@ -138,8 +154,13 @@ final class FortressView: NSView {
     metalLayer.drawableSize = CGSize(width: pixelWidth, height: pixelHeight)
     metalLayer.contentsScale = scale
 
-    controller.resize(pixelWidth: pixelWidth, pixelHeight: pixelHeight)
-    host.setCamera(controller.camera)
+    // Only publish when the tile-space camera actually moved. AppKit calls
+    // this continuously during a live drag, and most of those pixel deltas do
+    // not cross a tile boundary, so taking the host's lock each time would be
+    // contention for no change.
+    if controller.resize(pixelWidth: pixelWidth, pixelHeight: pixelHeight) {
+      host.setCamera(controller.camera)
+    }
   }
 
   // MARK: - Input

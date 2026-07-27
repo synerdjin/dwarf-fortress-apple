@@ -19,9 +19,12 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 
 ## Pending owner decisions
 
-- **PC-001 and PC-002 are not jointly satisfiable as written.** At 300×200 with
-  4 layers — PC-001's own viewport — snapshot publication costs ~2.48 ms/tick
-  against PC-002's 1 ms budget. At 144×144 it costs 0.92 ms and passes. Cause:
+- **PC-001 and PC-002 are not jointly satisfiable as written.** At 300×200 —
+  PC-001's own viewport — snapshot publication costs **2.29 ms/tick** against
+  PC-002's 1 ms budget. At 144×144 it costs 0.87 ms and passes; `ci.sh` now
+  enforces the real 1 ms budget there and holds a documented 3.0 tripwire at
+  the larger viewport rather than pretending a laxer budget is the requirement.
+  Cause:
   `buildSnapshot` (`Tileset.swift:126`) rebuilds every visible tile every tick;
   the per-block dirty-flag reuse the plan's Cost Control paragraph describes was
   never implemented, and cannot be built on `Block.dirty`, which review §4.3

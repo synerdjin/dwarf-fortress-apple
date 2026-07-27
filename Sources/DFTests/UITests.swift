@@ -18,23 +18,25 @@ public func registerUITests() {
       // middle and half these points would land on the neighbour.
       let map = InputMap()
       let pixelsPerTile = 8
-      var actions: Set<String> = []
+      var actions: [InputAction] = []
 
       // Tile (3, 2) occupies pixels [24, 32) x [16, 24).
-      var samples = 0
       for stepX in 0..<32 {
         for stepY in 0..<32 {
           let x = 24.0 + Double(stepX) * 0.25   // 24.00 ... 31.75
           let y = 16.0 + Double(stepY) * 0.25   // 16.00 ... 23.75
-          let action = map.action(
-            for: Click(x: x, y: y), camera: camera, pixelsPerTile: pixelsPerTile)
-          actions.insert("\(action)")
-          samples += 1
+          actions.append(
+            map.action(for: Click(x: x, y: y), camera: camera, pixelsPerTile: pixelsPerTile))
         }
       }
 
-      expectEqual(samples, 1024)
-      expectEqual(actions.count, 1)
+      // `InputAction` is Equatable, so compare the values rather than their
+      // descriptions -- a stringly-typed set would also pass if two different
+      // actions happened to print the same way.
+      expectEqual(actions.count, 1024)
+      expect(
+        actions.allSatisfy { $0 == actions[0] },
+        "sub-pixel positions inside one tile produced differing actions")
 
       // And it is the *right* tile, not merely a consistent one.
       let expected = InputAction.fortress(
@@ -215,7 +217,6 @@ public func registerUITests() {
     test("setCamera changes what is snapshotted but not what is simulated") {
       let host = makeHost(camera: camera)
       for _ in 0..<20 { host.stepOnce() }
-      let hashBefore = host.stateHash
       let firstOrigin = host.ring.latest()?.camera.origin
 
       host.setCamera(Camera(origin: Coord3(8, 8, 4), size: Coord3(16, 16, 1), depthLayers: 1))
@@ -229,7 +230,6 @@ public func registerUITests() {
         scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
       reference.run(ticks: 21)
       expectEqual(host.stateHash, reference.stateHash)
-      _ = hashBefore
     }
 
     test("stop() halts the loop rather than leaving the thread spinning") {

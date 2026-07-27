@@ -24,11 +24,18 @@ func option(_ name: String, default fallback: Int) -> Int {
   return value
 }
 
-let scenarioName = arguments.firstIndex(of: "--scenario").map { arguments[$0 + 1] } ?? "small-dig"
-guard let scenario = Scenario.all.first(where: { $0.name == scenarioName }) else {
+func stringOption(_ name: String, default fallback: String) -> String {
+  guard let index = arguments.firstIndex(of: "--\(name)"), index + 1 < arguments.count else {
+    return fallback
+  }
+  return arguments[index + 1]
+}
+
+let scenarioName = stringOption("scenario", default: "small-dig")
+guard let scenario = Scenario.named(scenarioName) else {
+  let available = Scenario.all.map(\.name).joined(separator: ", ")
   FileHandle.standardError.write(
-    "unknown scenario \(scenarioName); try: \(Scenario.all.map(\.name).joined(separator: ", "))\n"
-      .data(using: .utf8)!)
+    Data("unknown scenario '\(scenarioName)'. Available: \(available)\n".utf8))
   exit(2)
 }
 
@@ -45,14 +52,24 @@ let fortress = Fortress.make(
   scenario: scenario, seed: UInt64(option("seed", default: 1)), jobs: JobSystem(),
   isRecording: true)
 
-let pixelsPerTile = option("zoom", default: 8)
+// The viewport opens no larger than the map. Showing more tiles than exist
+// just renders empty space, which is what the first version of this did: on a
+// 64x48 map it opened a 160x77 viewport and 60% of the window was blank.
+let visibleTiles = Coord3(
+  min(80, fortress.map.size.x),
+  min(40, fortress.map.size.y),
+  1)
 var controller = CameraController(
   camera: Camera(
     origin: Coord3(0, 0, Int32(option("z", default: Int(scenario.mapSize.z) - 2))),
-    size: Coord3(80, 40, 1),
+    size: visibleTiles,
     depthLayers: option("layers", default: 2)),
-  pixelsPerTile: pixelsPerTile,
+  pixelsPerTile: option("zoom", default: 8),
   mapSize: fortress.map.size)
+// Read back, not the raw option: CameraController clamps zoom to [4, 32], and
+// the window must be sized from the value actually in force or the two
+// disagree about how big a tile is.
+let pixelsPerTile = controller.pixelsPerTile
 
 let host = SimulationHost(fortress: fortress, camera: controller.camera)
 
@@ -64,10 +81,19 @@ let application = NSApplication.shared
 application.setActivationPolicy(.regular)
 
 let view = FortressView(host: host, renderer: renderer, controller: controller)
+
+// `pixelsPerTile` is in *device* pixels -- that is the unit FortressView
+// divides the drawable by, and keeping tiles an exact pixel multiple is what
+// keeps nearest-neighbour sampling crisp. NSWindow takes points. Dividing by
+// the screen's backing scale is what makes the window show the tile count
+// asked for: without it, a Retina display got exactly twice as many tiles as
+// intended, which is the bug that left most of the window blank.
+let backingScale = NSScreen.main?.backingScaleFactor ?? 1
+let contentSize = NSSize(
+  width: CGFloat(Int(controller.camera.size.x) * pixelsPerTile) / backingScale,
+  height: CGFloat(Int(controller.camera.size.y) * pixelsPerTile) / backingScale)
 let window = NSWindow(
-  contentRect: NSRect(
-    x: 0, y: 0,
-    width: CGFloat(80 * pixelsPerTile), height: CGFloat(40 * pixelsPerTile)),
+  contentRect: NSRect(origin: .zero, size: contentSize),
   styleMask: [.titled, .closable, .miniaturizable, .resizable],
   backing: .buffered,
   defer: false)

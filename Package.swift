@@ -35,7 +35,7 @@ let package = Package(
         // values from a queue") is enforced by the module graph rather than by
         // discipline -- there is no import that would let a click handler write
         // a component even if someone tried.
-        .target(name: "DFUI", dependencies: ["DFCore", "DFSim", "DFRender"], swiftSettings: .df),
+        .target(name: "DFUI", dependencies: ["DFCore", "DFSim"], swiftSettings: .df),
         .executableTarget(
             name: "dfsimCLI",
             dependencies: ["DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],

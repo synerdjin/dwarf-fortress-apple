@@ -29,6 +29,12 @@ public final class SimulationHost: @unchecked Sendable {
 
   private let lock = NSLock()
   private var inbox: [Command] = []
+  /// Swapped with `inbox` under the lock so draining costs no allocation.
+  /// Copying `inbox` out and calling `removeAll(keepingCapacity:)` does not
+  /// work: the copy keeps the storage referenced, so `removeAll` finds it
+  /// non-unique and allocates fresh storage anyway — one malloc/free per tick
+  /// forever, for a buffer that is almost always empty.
+  private var inboxScratch: [Command] = []
   private var camera: Camera
   private var stopping = false
 
@@ -74,8 +80,7 @@ public final class SimulationHost: @unchecked Sendable {
   @discardableResult
   public func stepOnce() -> Bool {
     lock.lock()
-    let commands = inbox
-    inbox.removeAll(keepingCapacity: true)
+    swap(&inbox, &inboxScratch)
     let currentCamera = camera
     let shouldStop = stopping
     lock.unlock()
@@ -84,13 +89,20 @@ public final class SimulationHost: @unchecked Sendable {
 
     // Input becomes commands like any other source, so a recorded session
     // replays identically (SC-004).
-    for command in commands {
+    for command in inboxScratch {
       fortress.submit(command)
     }
+    inboxScratch.removeAll(keepingCapacity: true)
     fortress.step()
 
-    let snapshot = fortress.snapshot(camera: currentCamera)
-    ring.publish { $0 = snapshot }
+    // Built *into* the ring's writer buffer, not assigned over it. The ring
+    // rotates three buffers precisely so the writer can reuse their storage,
+    // and `buildSnapshot` only reallocates when the instance count changes --
+    // but `snapshot(camera:)` hands it a fresh empty FrameSnapshot every time,
+    // which makes that check fail every tick and defeats both mechanisms. At a
+    // 300x200 camera that was ~2.8 MiB allocated, zero-filled, overwritten and
+    // freed per tick.
+    ring.publish { fortress.buildSnapshot(camera: currentCamera, tileset: .ascii, into: &$0) }
     return true
   }
 
@@ -119,4 +131,16 @@ public final class SimulationHost: @unchecked Sendable {
 
   /// The current state hash. Simulation-thread only; used by tests.
   public var stateHash: UInt64 { fortress.stateHash }
+
+  /// Ticks elapsed. Simulation-thread only.
+  public var tick: UInt64 { fortress.tick }
+
+  /// The recorded command stream, for writing a replay fixture.
+  ///
+  /// Exposed so `dfsim ui-session` can drive this host rather than
+  /// re-implementing `stepOnce()`. That matters beyond tidiness: the snapshot
+  /// path is going to change when per-block dirty-flag reuse lands, and a
+  /// fixture or bench that hand-rolled the loop would keep exercising the code
+  /// that was replaced.
+  public var recording: [TimedCommand] { fortress.commands.recording }
 }
