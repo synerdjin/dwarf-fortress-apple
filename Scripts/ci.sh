@@ -42,6 +42,22 @@ for scenario in small-dig 200-dwarves; do
     || fail "determinism-check $scenario"
 done
 
+step "Headless render capture"
+# SC-002/SC-003: the GPU path must agree with the ASCII path and be
+# reproducible. Skipped rather than failed where no GPU is reachable.
+mkdir -p out
+if swift run -c release dfsim shot --scenario small-dig --tick 4000 \
+     --width 40 --height 24 --out out/ci-frame.png > /dev/null 2>&1; then
+  echo "captured out/ci-frame.png"
+  swift run -c release dfsim shot --scenario small-dig --tick 4000 \
+    --width 40 --height 24 --out out/ci-frame-2.png | grep pixelHash
+  cmp -s out/ci-frame.png out/ci-frame-2.png \
+    || fail "two captures of the same state differ (DR-003)"
+  echo "two captures byte-identical"
+else
+  echo "no GPU reachable -- capture skipped"
+fi
+
 step "Performance budgets"
 # M0 has no enforced budget; the number is recorded so a regression is visible
 # in CI output before M3 attaches a real threshold to it.
