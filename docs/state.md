@@ -15,13 +15,14 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | Last completed | M1 phases 1–3 (snapshot boundary, tilemap renderer, headless capture) |
 | Next | Review remediation **P0 batch first** (`docs/decisions/0002`), then constitution v1.1.0, then M1 phases 4–5 |
 | Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3 |
+| Remote | https://github.com/synerdjin/dwarf-fortress-apple, PR #1 open (`main` ← `m1-metal-tilemap-renderer`), CI green |
 
 ## Pending owner approvals
 
 - Constitution amendments v1.1.0 (proposals in `docs/review-2026-07-27.md` §6) —
   returns for approval **after** the P0 batch, per `docs/decisions/0002`.
   Invariant VI (serialized-state versioning) already adopted in principle there.
-- Remote host choice for branch protection (backlog item 7)
+
 
 ## Open work queues
 
@@ -43,6 +44,15 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: Remote created by owner; PR #1 opened; GitHub Actions CI added
+  (`.github/workflows/ci.yml`, mirrors `Scripts/ci.sh` verbatim) and passed on
+  first run (0.18 ms/tick on the hosted runner, capture step legitimately
+  soft-skipped -- no Metal device on that runner). Branch protection on `main`
+  now requires the `Scripts/ci.sh` check, applies to admins, blocks
+  force-push/deletion -- closes backlog item 7. Note: `origin/main` had been
+  pushed pointing at the same commit as the feature branch (empty diff, no PR
+  possible); fixed with an explicitly confirmed force-push back to the
+  M0-complete commit, no commits lost.
 - 2026-07-27: Remediation plan approved (`docs/decisions/0002`): P0 batch before
   amendments; Invariant VI adopted in principle. P0 queue: install patches, then
   backlog items 1–7. Nothing implemented yet.
