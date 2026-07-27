@@ -107,8 +107,11 @@ public final class Fortress: @unchecked Sendable {
     )
 
     // Mining: miners adjacent to their target make progress and, on
-    // completion, dig it out. Digging mutates the shared map, so the work is
-    // gathered into per-partition scratch and applied in partition order.
+    // completion, dig it out. Entirely serial today -- see `runMining` for why
+    // (RNG draws in target assignment). Completed digs are gathered into a
+    // list and applied to the map after the scan, so the map is not mutated
+    // while it is being read; that is a read/write ordering discipline, not
+    // partitioning.
     scheduler.register(
       SystemDescriptor(
         name: "mining",
@@ -200,9 +203,16 @@ public final class Fortress: @unchecked Sendable {
     guard miners.componentCount > 0 else { return }
 
     // Target assignment reads the map and draws from an RNG stream, so it runs
-    // serially in entity order. Parallelising it would mean the order of RNG
-    // draws depended on partitioning -- the exact coupling Constitution II
-    // exists to prevent.
+    // serially. Parallelising it would mean the order of RNG draws depended on
+    // partitioning -- the exact coupling Constitution II exists to prevent.
+    //
+    // The iteration is in **dense order**, not entity order. Dense order is a
+    // consequence of allocation and removal history, so this loop's outcome
+    // must not depend on it: each miner's decision reads only its own
+    // components and the map, and `findDigTarget` breaks ties by coordinate
+    // rather than by scan order. Nothing enforces that property today -- see
+    // docs/review-2026-07-27.md §4.1.1, backlog item 19, which decides between
+    // a shuffled-storage fixture check and hashing dense order outright.
     var completed: [Coord3] = []
     miners.withDense { values, owners in
       for index in 0..<values.count {
@@ -274,6 +284,11 @@ public final class Fortress: @unchecked Sendable {
   // MARK: - Hashing
 
   /// The digest replay assertions compare.
+  ///
+  /// Covers everything that can affect a future tick: the clock, both RNG
+  /// streams, all components (including the entity allocator's free list, which
+  /// determines the next `EntityID`), the map, and the undrained command queue.
+  /// `commands` folds only its pending half -- see `CommandQueue.hash`.
   public func hash(into hasher: inout StateHasher) {
     hasher.combine(tick)
     hasher.combine(seed)
@@ -281,6 +296,7 @@ public final class Fortress: @unchecked Sendable {
     hasher.combine(pathRNG)
     world.hash(into: &hasher)
     map.hash(into: &hasher)
+    commands.hash(into: &hasher)
   }
 
   public var stateHash: UInt64 {

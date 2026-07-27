@@ -126,4 +126,24 @@ public struct CommandQueue: Sendable {
   public mutating func clearRecording() {
     recording.removeAll(keepingCapacity: false)
   }
+
+  /// Folds the **pending** queue into the tick hash.
+  ///
+  /// Pending commands are future-affecting state: two fortresses identical in
+  /// every other respect but holding different undrained commands will diverge
+  /// on the next `step()`. Leaving them out meant `Fortress.stateHash` could
+  /// certify as equal two states that were about to stop being equal, which is
+  /// the one thing the digest exists to prevent.
+  ///
+  /// `recording` is deliberately excluded. It is an append-only log of what has
+  /// already been applied and cannot influence any future tick -- and it is
+  /// present or absent depending on `isRecording`, which is true while
+  /// recording a fixture and false while replaying one. Hashing it would make
+  /// every replay disagree with the run it replays.
+  public func hash(into hasher: inout StateHasher) {
+    hasher.combine(pending.count)
+    for command in pending {
+      command.hash(into: &hasher)
+    }
+  }
 }

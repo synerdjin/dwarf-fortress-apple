@@ -282,6 +282,48 @@ func registerMapStoreTests() {
       expectEqual(fortress.map[target].designation, Designation.none)
     }
 
+    test("An undrained command is part of the state hash") {
+      // Two fortresses that have run identically, one holding a command the
+      // other does not. They are about to diverge on the next step, so a
+      // digest that calls them equal is lying about exactly the property it
+      // exists to certify. Before pending commands were hashed, it did.
+      let quiet = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      let loaded = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      quiet.run(ticks: 300)
+      loaded.run(ticks: 300)
+      expectEqual(quiet.stateHash, loaded.stateHash, "identical runs must agree first")
+
+      let target = Coord3(4, 4, loaded.map.size.z - 3)
+      loaded.submit(
+        Command(kind: .designate, region: Region3(origin: target, size: Coord3(1, 1, 1)),
+          designation: .dig))
+      expectNotEqual(
+        quiet.stateHash, loaded.stateHash,
+        "a pending command is future-affecting state and must be in the digest")
+
+      // And once it drains and applies, the difference is real map state, so
+      // they must still differ -- the pending term is not masking anything.
+      loaded.step()
+      quiet.step()
+      expectNotEqual(quiet.stateHash, loaded.stateHash)
+    }
+
+    test("The recording is not part of the state hash") {
+      // `recording` exists only while capturing a fixture and is absent while
+      // replaying one. If it were hashed, every replay would diverge from the
+      // run it replays at the first checkpoint.
+      let recording = Fortress.make(scenario: .smallDig, seed: 1, jobs: JobSystem())
+      let silent = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      recording.run(ticks: 400)
+      silent.run(ticks: 400)
+      expect(!recording.commands.recording.isEmpty, "the recording side must have recorded")
+      expect(silent.commands.recording.isEmpty)
+      expectEqual(recording.stateHash, silent.stateHash)
+    }
+
     test("Commands are recorded in submission order") {
       let fortress = Fortress.make(scenario: .smallDig, seed: 1, jobs: JobSystem())
       fortress.run(ticks: 2)
