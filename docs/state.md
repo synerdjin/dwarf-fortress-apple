@@ -42,6 +42,21 @@ before re-blessing. When parallel agents exist, split this table.
 | DFCore, DFECS, DFSim, DFRender, DFTests | active-milestone agent |
 | `Fixtures/replays/smoke.rec` | active-milestone agent |
 
+### Golden-hash changes (newest first)
+
+- **2026-07-27, `smoke.rec`, all 101 checkpoints.** `Fortress.hash` now folds the
+  pending command queue (P0 backlog item 5). Undrained commands are
+  future-affecting state: two fortresses alike in every other respect but
+  holding different pending commands diverge on the next `step()`, and the old
+  digest certified them equal. Adding the term shifts every hash in the stream
+  (`tick 1: 7d62ae4f484e653e -> 41c89984fa50418b`); no behaviour changed, and no
+  divergence predates the term. `recording` is deliberately excluded — it is
+  absent during replay, so hashing it would make every replay disagree with the
+  run it replays. Re-recorded with the same command that produced the original:
+  `swift run -c release dfsim record --scenario small-dig --seed 1 --ticks 10000
+  --hash-interval 100 --out Fixtures/replays/smoke.rec`.
+  Sole owner of the fixture per the table above; recorded here before re-blessing.
+
 ## Session log (newest first, keep last ~5)
 
 - 2026-07-27: PR #1 merged into `main`. Local and remote `main` and
