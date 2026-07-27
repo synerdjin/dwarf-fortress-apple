@@ -15,8 +15,14 @@ swift build || fail "debug build"
 step "Build (release)"
 swift build -c release || fail "release build"
 
-step "Unit tests"
-swift run dftest || fail "unit tests"
+step "Unit tests (debug)"
+swift run dftest || fail "unit tests (debug)"
+
+step "Unit tests (release)"
+# Debug and release are demonstrably different programs here -- see
+# docs/known-issues.md KI-001, a release-only crash that hid for two milestones
+# because only debug was routinely exercised. Both configurations are gates.
+swift run -c release dftest || fail "unit tests (release)"
 
 step "Replay fixtures"
 # Golden hashes are contracts between agents. If your change moves them, that is
