@@ -1,16 +1,23 @@
 import DFCore
 
-/// A component: plain data attached to an entity.
+/// Trivially copyable simulation data that contributes to the state hash.
 ///
-/// `BitwiseCopyable` is invariant 4 and is enforced here by the type system --
-/// a component containing a `String` or a `class` simply will not compile. That
+/// `BitwiseCopyable` is Constitution IV and is enforced here by the type system
+/// -- data containing a `String` or a `class` simply will not compile. That
 /// buys ARC-free iteration over hundreds of thousands of entities and makes
 /// serialization a bulk copy rather than a graph walk.
-public protocol Component: BitwiseCopyable, Sendable {
-  /// Folds this component's fields into the per-tick state hash. Cover every
-  /// field; an unhashed field can drift between runs with no test noticing.
+public protocol PlainData: BitwiseCopyable, Sendable {
+  /// Folds this value's fields into the per-tick state hash. Cover every field;
+  /// an unhashed field can drift between runs with no test noticing.
   func hash(into hasher: inout StateHasher)
 }
+
+/// A component: plain data attached one-per-entity.
+///
+/// For data an entity has a *variable number of* -- body parts, wounds,
+/// inventory, skills -- use `ListStorage` instead, whose element type is
+/// `PlainData` rather than `Component`.
+public protocol Component: PlainData {}
 
 /// Sparse-set storage for one component type.
 ///
