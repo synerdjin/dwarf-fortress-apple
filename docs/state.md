@@ -10,18 +10,24 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `remediation/p0-batch`, off `main`. Awaiting PR/review. `m1-metal-tilemap-renderer` still exists remotely, fast-forwarded to `main`. |
+| Branch | `docs/constitution-v1.1.0`, off `main` (`f4c951b`, PR #3 merged). `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | Review remediation **P0 batch complete** (backlog items 1–7 + scaffolding patches). Before that: M1 phases 1–3, merged via PR #1. |
-| Next | Constitution v1.1.0 approval — the P0 batch is now the evidence `docs/decisions/0002` required. Then M1 phases 4–5 (window, camera, click-to-designate). |
+| Last completed | Constitution v1.1.0 **drafted and submitted for approval** (`docs/decisions/0003`). Before that: review remediation P0 batch (items 1–7 + scaffolding patches), merged via PR #3. |
+| Next | **Owner approval of `docs/decisions/0003`** — blocked on a human; nothing else in the plan depends on it. Unblocked meanwhile: M1 phases 4–5 (window, camera, click-to-designate), and P1 backlog item 13 (KI-001 discriminators, §5.3). |
 | Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3, now P1 backlog item 13 |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
 ## Pending owner approvals
 
-- Constitution amendments v1.1.0 (proposals in `docs/review-2026-07-27.md` §6) —
-  returns for approval **after** the P0 batch, per `docs/decisions/0002`.
-  Invariant VI (serialized-state versioning) already adopted in principle there.
+- **Constitution v1.1.0 — `docs/decisions/0003`, submitted 2026-07-27.** Proposed
+  text is `.specify/memory/constitution-v1.1.0-draft.md`; `constitution.md` stays
+  v1.0.0 and in force until approved. Nine clauses in three groups: (A) four that
+  codify mechanisms the P0 batch already built, (B) five forward-looking rules
+  that gate M3/M4/M6 — including Invariant VI, adopted in principle by 0002 and
+  worded here, (C) two optional additions raised this session (Invariant I
+  extended to the *processor*, barring GPU-float/Core ML from sim state; and
+  bytes-per-tick alongside ms/tick in perf budgets). Groups can be approved
+  independently. Migration impact: none retroactive, no fixture moves.
 
 
 ## Open work queues
@@ -63,6 +69,16 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: Constitution v1.1.0 drafted and submitted (`docs/decisions/0003`,
+  draft text in `.specify/memory/constitution-v1.1.0-draft.md`); **nothing
+  applied — the constitution remains v1.0.0 pending owner approval.** Baseline
+  `Scripts/ci.sh` green on `main` before and after: 136 tests, 0 failures,
+  0 skips, 0.095 ms/tick (0.9% of the 10 ms budget). Also reviewed a proposal to
+  push simulation onto the GPU and Neural Engine; rejected for sim state and
+  folded into the amendment as clause 7 rather than the roadmap — reasoning in
+  0003 Group C. Only non-draft code/doc change: a 128-byte cache-line note in
+  `CLAUDE.md` conventions. Next agent: if 0003 is still unapproved, do not wait
+  on it — M1 phases 4–5 and KI-001 item 13 are independent.
 - 2026-07-27: **P0 remediation batch complete** on `remediation/p0-batch`, six
   commits, `Scripts/ci.sh` green (exit 0) end to end. Skills installed and
   `scaffolding-patches/` retired; `determinism-check` widened to
