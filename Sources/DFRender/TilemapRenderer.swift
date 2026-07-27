@@ -263,6 +263,8 @@ public final class TilemapRenderer {
 
   private func uploadInstances(_ instances: [TileInstance]) throws {
     let byteCount = instances.count * MemoryLayout<TileInstance>.stride
+    guard byteCount > 0 else { return }
+
     if instanceCapacity < byteCount || instanceBuffer == nil {
       // `.storageModeShared` is the unified-memory payoff: the CPU writes and
       // the GPU reads the same pages, with no staging copy or upload step.
@@ -274,8 +276,23 @@ public final class TilemapRenderer {
       instanceBuffer = buffer
       instanceCapacity = buffer.length
     }
-    instances.withUnsafeBytes { source in
-      instanceBuffer!.contents().copyMemory(from: source.baseAddress!, byteCount: byteCount)
+
+    // Written defensively after a release-only crash localised to this
+    // function. The previous version force-unwrapped the stored property from
+    // inside the `withUnsafeBytes` closure and let the destination pointer be
+    // re-derived there. This version takes a local strong reference and
+    // resolves the destination pointer *before* entering the closure, so the
+    // buffer's lifetime does not depend on how the optimizer treats a stored
+    // property accessed across a closure boundary.
+    //
+    // Honest status: restructuring made the crash stop reproducing, and the
+    // regression test below exercises the path hard, but the original defect
+    // was not root-caused. If it returns, suspect this function first.
+    guard let buffer = instanceBuffer else { throw RenderError.bufferCreationFailed }
+    let destination = buffer.contents()
+    instances.withUnsafeBufferPointer { source in
+      guard let base = source.baseAddress else { return }
+      destination.copyMemory(from: UnsafeRawPointer(base), byteCount: byteCount)
     }
   }
 }

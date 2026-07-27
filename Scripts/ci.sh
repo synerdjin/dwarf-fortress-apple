@@ -46,8 +46,15 @@ step "Headless render capture"
 # SC-002/SC-003: the GPU path must agree with the ASCII path and be
 # reproducible. Skipped rather than failed where no GPU is reachable.
 mkdir -p out
-if swift run -c release dfsim shot --scenario small-dig --tick 4000 \
-     --width 40 --height 24 --out out/ci-frame.png > /dev/null 2>&1; then
+# A crash must not be reported as "no GPU". Probe for a device first, then
+# treat any capture failure as a real failure -- an earlier version of this
+# script swallowed a release-only SIGTRAP as "no GPU reachable" and reported
+# all gates passed while `shot` was broken.
+if swift run -c release dfsim scenarios > /dev/null 2>&1 \
+   && system_profiler SPDisplaysDataType 2>/dev/null | grep -q Metal; then
+  swift run -c release dfsim shot --scenario small-dig --tick 4000 \
+    --width 40 --height 24 --out out/ci-frame.png > /dev/null \
+    || fail "dfsim shot failed (exit $?)"
   echo "captured out/ci-frame.png"
   swift run -c release dfsim shot --scenario small-dig --tick 4000 \
     --width 40 --height 24 --out out/ci-frame-2.png | grep pixelHash
@@ -55,7 +62,7 @@ if swift run -c release dfsim shot --scenario small-dig --tick 4000 \
     || fail "two captures of the same state differ (DR-003)"
   echo "two captures byte-identical"
 else
-  echo "no GPU reachable -- capture skipped"
+  echo "no Metal device advertised -- capture skipped"
 fi
 
 step "Performance budgets"

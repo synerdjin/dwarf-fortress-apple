@@ -148,54 +148,54 @@ public struct FrameSnapshot: Sendable {
 /// With three buffers the writer always has a free one: at most one is
 /// published and at most one is being read.
 public final class FrameSnapshotRing: @unchecked Sendable {
-  private var buffers: [FrameSnapshot]
-  /// Index of the newest complete buffer, or -1 before the first publish.
-  private var publishedIndex: Int32 = -1
-  /// Index the reader currently holds, so the writer avoids it.
-  private var readerIndex: Int32 = -1
-  /// Next buffer the writer will fill.
-  private var writeIndex: Int = 0
+  /// Rotating scratch buffers, touched **only by the writer**. They are not
+  /// shared, so no lock is needed to build into them.
+  ///
+  /// An earlier version kept these in an array both threads indexed, on the
+  /// reasoning that distinct indices cannot collide. That is wrong, and it
+  /// crashed only in release builds: mutating `buffers[i]` goes through
+  /// `Array`'s own storage and its copy-on-write uniqueness check, so a
+  /// concurrent read of `buffers[j]` races on the array itself — and since a
+  /// snapshot holds a refcounted `instances` array, the race manifests as an
+  /// over-release rather than as stale data. Debug builds hid it.
+  private var writerBuffers: [FrameSnapshot]
+  private var writeIndex = 0
+
+  /// The published snapshot. Guarded by `lock`.
+  private var published: FrameSnapshot?
   private let lock = NSLock()
 
   public init() {
-    buffers = Array(repeating: FrameSnapshot(), count: 3)
+    writerBuffers = Array(repeating: FrameSnapshot(), count: 3)
   }
 
-  /// Fills the next free buffer and publishes it.
+  /// Builds the next snapshot and publishes it.
   ///
-  /// The critical section covers only index bookkeeping, never the snapshot
-  /// build itself — `body` runs outside it, so a slow build cannot stall a
-  /// reader.
+  /// `body` runs entirely outside the lock, against a buffer no other thread
+  /// can see. The critical section is a single struct assignment — a handful of
+  /// retains — so a slow snapshot build can never stall the renderer, which is
+  /// what PC-002 requires.
   public func publish(_ body: (inout FrameSnapshot) -> Void) {
-    let target = nextWritableIndex()
-    body(&buffers[target])
+    writeIndex = (writeIndex + 1) % writerBuffers.count
+    body(&writerBuffers[writeIndex])
+    let ready = writerBuffers[writeIndex]
+
     lock.lock()
-    publishedIndex = Int32(target)
+    published = ready
     lock.unlock()
   }
 
   /// The newest complete snapshot, or nil if nothing has been published.
+  ///
+  /// Returns a value copy. Copying retains the instance array rather than
+  /// duplicating it, so this is cheap; if the writer later needs that buffer
+  /// back while the reader still holds it, copy-on-write makes a fresh
+  /// allocation instead of corrupting the reader's view. Three rotating buffers
+  /// make that rare.
   public func latest() -> FrameSnapshot? {
     lock.lock()
-    let index = publishedIndex
-    if index >= 0 { readerIndex = index }
-    lock.unlock()
-    guard index >= 0 else { return nil }
-    return buffers[Int(index)]
-  }
-
-  private func nextWritableIndex() -> Int {
-    lock.lock()
     defer { lock.unlock() }
-    // Skip whatever is published or being read; with three buffers at least one
-    // of the three is always free.
-    for _ in 0..<3 {
-      writeIndex = (writeIndex + 1) % 3
-      if Int32(writeIndex) != publishedIndex && Int32(writeIndex) != readerIndex {
-        return writeIndex
-      }
-    }
-    return writeIndex
+    return published
   }
 }
 
