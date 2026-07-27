@@ -156,6 +156,90 @@ public func registerUITests() {
     }
   }
 
+  suite("SPEC-M1-VIEW: Simulation host (T011)") {
+    // The window itself cannot be tested headlessly, so everything the window
+    // does *except* AppKit lives in SimulationHost and is tested here. What is
+    // left untested by design is NSEvent translation and CAMetalLayer
+    // presentation; see docs/known-issues.md.
+
+    func makeHost(camera: Camera) -> SimulationHost {
+      let fortress = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      return SimulationHost(fortress: fortress, camera: camera)
+    }
+
+    let camera = Camera(origin: Coord3(0, 0, 6), size: Coord3(16, 16, 1), depthLayers: 1)
+
+    test("DR-001: hosting a fortress for a window does not change what it computes") {
+      // The strongest form of "rendering must not alter simulation state":
+      // run the same scenario for the same ticks with and without the whole
+      // host apparatus -- snapshot publication, camera reads, command inbox --
+      // and require the hashes to match exactly.
+      let bare = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      bare.run(ticks: 500)
+
+      let host = makeHost(camera: camera)
+      for _ in 0..<500 { host.stepOnce() }
+
+      expectEqual(host.stateHash, bare.stateHash)
+    }
+
+    test("a published snapshot tracks the tick that produced it") {
+      let host = makeHost(camera: camera)
+      for _ in 0..<10 { host.stepOnce() }
+      guard let snapshot = host.ring.latest() else {
+        expect(false, "the host published nothing after ten ticks")
+        return
+      }
+      expectEqual(snapshot.tick, 10)
+      expect(!snapshot.isEmpty, "a snapshot of a real camera should have instances")
+    }
+
+    test("a command submitted from the UI thread reaches the simulation") {
+      // The path input has to travel: submit() from another thread, drained at
+      // the top of a tick, applied through the command queue like any other
+      // source. If this broke, clicks would silently do nothing.
+      let hostA = makeHost(camera: camera)
+      let hostB = makeHost(camera: camera)
+      for _ in 0..<50 { hostA.stepOnce() }
+
+      hostB.submit(.designate(Region3(origin: Coord3(4, 4, 6), size: Coord3(1, 1, 1)), .dig))
+      for _ in 0..<50 { hostB.stepOnce() }
+
+      expect(
+        hostA.stateHash != hostB.stateHash,
+        "a designation submitted through the host left no trace in the state hash")
+    }
+
+    test("setCamera changes what is snapshotted but not what is simulated") {
+      let host = makeHost(camera: camera)
+      for _ in 0..<20 { host.stepOnce() }
+      let hashBefore = host.stateHash
+      let firstOrigin = host.ring.latest()?.camera.origin
+
+      host.setCamera(Camera(origin: Coord3(8, 8, 4), size: Coord3(16, 16, 1), depthLayers: 1))
+      host.stepOnce()
+
+      expectEqual(host.ring.latest()?.camera.origin, Coord3(8, 8, 4))
+      expect(firstOrigin != host.ring.latest()?.camera.origin, "the camera should have moved")
+      // One extra tick advanced the sim, so compare against a bare fortress
+      // rather than against hashBefore.
+      let reference = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      reference.run(ticks: 21)
+      expectEqual(host.stateHash, reference.stateHash)
+      _ = hashBefore
+    }
+
+    test("stop() halts the loop rather than leaving the thread spinning") {
+      let host = makeHost(camera: camera)
+      expect(host.stepOnce(), "a fresh host should step")
+      host.stop()
+      expect(!host.stepOnce(), "after stop() the loop must report that it is done")
+    }
+  }
+
   suite("SPEC-M1-VIEW: Input classification (DR-001)") {
     test("every camera key maps to a view action, never a command") {
       // DR-001 in the form the type system can carry: if a movement key ever

@@ -19,6 +19,7 @@ let package = Package(
         .library(name: "DFRender", targets: ["DFRender"]),
         .library(name: "DFUI", targets: ["DFUI"]),
         .executable(name: "dfsim", targets: ["dfsimCLI"]),
+        .executable(name: "dwarffortress", targets: ["dwarffortress"]),
         .executable(name: "dftest", targets: ["DFTests"]),
     ],
     targets: [
@@ -41,6 +42,15 @@ let package = Package(
             // Not "Sources/dfsim": the filesystem is case-insensitive, so that
             // path collides with the DFSim library target.
             path: "Sources/DFSimCLI",
+            swiftSettings: .df
+        ),
+        // The windowed app. Nothing depends on it, and it is the only target
+        // that links AppKit -- so the simulation, the tests and `dfsim` all
+        // stay buildable and runnable with no window server present.
+        .executableTarget(
+            name: "dwarffortress",
+            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],
+            path: "Executables/dwarffortress",
             swiftSettings: .df
         ),
         // Tests are an executable, not a `.testTarget`. Neither swift-testing

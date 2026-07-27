@@ -182,6 +182,15 @@ public final class TilemapRenderer {
     atlas = try GlyphAtlas(device: device)
   }
 
+  /// A command buffer on the renderer's own queue.
+  ///
+  /// `capture` makes its own because it also reads pixels back. A display loop
+  /// needs one it can `present` a drawable with, and sharing the queue is what
+  /// keeps frame ordering well defined.
+  public func makeCommandBuffer() -> MTLCommandBuffer? {
+    commandQueue.makeCommandBuffer()
+  }
+
   /// Encodes the snapshot into `target`.
   public func draw(
     _ snapshot: FrameSnapshot,
