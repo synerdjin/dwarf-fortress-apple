@@ -29,6 +29,29 @@ and every regression test in the project quietly becomes a coin flip.
 *Enforcement:* `Fixed` is the only fractional type `DFCore` exposes; a
 `Float`/`Double` in a sim module is a review rejection.
 
+**The rule is about the processor, not just the type.** A value
+enters sim state only from a compute unit whose numerics are reproducible *by
+contract*. CPU integer and `Fixed` arithmetic qualify: the ISA guarantees the
+result. The following do not, and may not produce sim state:
+
+- GPU floating-point of any kind, and Metal's default fast-math.
+- Any cross-lane or SIMD-group-width-dependent reduction, because threadgroup
+  and SIMD widths differ across GPU generations.
+- Core ML / Neural Engine inference. Core ML re-partitions layers across
+  ANE/GPU/CPU based on model shape, OS version and thermal state, and offers no
+  bit-exactness contract across any of them.
+
+Integer GPU compute is not banned outright, but it is admissible only under the
+conditions in *Determinism Rules for Parallel Code*, and the burden is on the
+proposing spec.
+
+*Rationale:* the invariant's purpose is a replay that reproduces bit-for-bit on
+a machine that is not this one. A unit whose vendor does not promise identical
+bits cannot be on the path to sim state, however fast it is. This clause exists
+because "the Neural Engine is idle, use it for dwarf moods" is advice that
+recurs, sounds like free performance, and would silently convert every replay
+fixture in the repository into a coin flip.
+
 ### II. All randomness flows through a named `RNGStream`
 
 Draw from a per-subsystem stream derived from the world seed:
@@ -67,6 +90,19 @@ serialization a bulk copy instead of a graph walk.
 *Enforcement:* the `Component` protocol refines `BitwiseCopyable`, so violations
 do not compile. Padding is asserted per-type in tests.
 
+Two consequences that are easy to get wrong once and impossible
+to change later:
+
+- **`SymbolID` assignment is deterministic sim state.** Either content-addressed
+  (a hash of the UTF-8 bytes, collisions checked and resolved deterministically)
+  or an append-only table that is itself serialized verbatim and hashed.
+  First-seen-order interning bakes execution history into hashed components and
+  is a review rejection.
+- **Positional indices into `ListStorage` lists are not stable references.**
+  Anything that cross-references a sub-entity — a wound naming a body part, an
+  item naming a container slot — uses a per-entity monotonic sub-ID, not an
+  index that shifts when an earlier element is removed.
+
 ### V. Every module ships unit tests and a headless `dfsim` verb
 
 If a subsystem can only be exercised by launching the app and looking at it, an
@@ -76,6 +112,29 @@ agent cannot verify it. Add the verb in the same change as the feature.
 `dfsim replay --assert-hashes` is how behaviour is held still. A change that
 "should work" and a change observed producing the right tiles are different
 things.
+
+### VI. Serialized state is sectioned and versioned
+
+Every on-disk format — replay, save, fixture — is a sequence of sections, each
+carrying a type tag, a layout version for that type, and a byte length. A reader
+skips sections whose tag it does not recognise rather than rejecting the file.
+Struct memory layout is never the schema unless a golden layout test asserts
+that struct's exact size, stride and field offsets.
+
+A save is a state snapshot plus a command tail. It is not a command log replayed
+from tick zero.
+
+*Rationale:* the replay container memcpys structs and guards them with a single
+global version field that hard-rejects on mismatch, so adding one field to
+`Command` invalidates every fixture in the repository with no upgrade path.
+Worldgen makes replay-from-zero unviable as a load strategy besides: regenerating
+a world is not a loading screen anyone waits through. This is the cheapest thing
+in the project to fix now and among the most expensive to fix after M4 multiplies
+the number of serialized types.
+
+*Enforcement:* a golden layout test per serialized struct; a reader test
+asserting an unknown section is skipped, not rejected. No new serialized format
+may be added before this invariant is implemented.
 
 ## Determinism Rules for Parallel Code
 
@@ -91,10 +150,38 @@ the pattern is followed:
   count changes, the system is wrong — not the machine.
 - Thread completion order must never influence state. If you cannot explain why
   your system is order-independent, it is not.
-- Any new parallel system must pass `dfsim determinism-check --threads 1,2,4`.
+- Any new parallel system must pass `dfsim determinism-check`.
 
 Locks do not satisfy this. Locking makes results *safe*, not *reproducible* —
 the order in which contending threads win is still arbitrary.
+
+Three additions, each covering a case the rules above do not:
+
+- **Stencil systems double-buffer.** A system that reads its neighbours reads a
+  previous-tick buffer and writes a next-tick buffer. An in-place stencil is a
+  review rejection: its result depends on whether a neighbour was visited
+  before or after the tile reading it, which is exactly the partition boundary.
+- **Partition-order merge is not conflict resolution.** Merging in partition
+  order gives a *reproducible* answer when two partitions write the same slot,
+  not the *serial* answer — it yields "last partition wins", which no serial
+  pass produces. A system whose partitions can collide must either state a
+  commutative, associative conflict rule (integer min, max, saturating add) or
+  run serially over a sorted work list. Choosing between those is a spec
+  decision, recorded in the spec, not a detail settled in code.
+- **The determinism gate tests realistic and unrealistic decompositions.**
+  `determinism-check` runs a thread set including 1, a prime, and a count
+  exceeding any plausible host core count — currently `1,2,3,7,16,64`. Testing
+  only `1,2,4` leaves the production path on a 10-core machine untested.
+
+**GPU compute is admissible only under all of the following**,
+and no system uses it today: integer arithmetic only, fast-math disabled, no
+cross-lane or SIMD-width-dependent operations, conflict resolution restricted to
+integer atomics that are commutative and associative, and a stated argument for
+why the kernel's result is independent of threadgroup size and dispatch order.
+Note the limit honestly: unlike CPU integer math, which the ISA guarantees, GPU
+reproducibility across vendor driver and hardware generations can only be
+*tested on the machines you have*. A spec proposing GPU sim work states which
+GPU families it was verified on.
 
 ## Research and Divergence Discipline
 
@@ -130,6 +217,42 @@ load-bearing and nobody remembers it was a guess.
   value is catching a rare condition, break it deliberately once, confirm it
   fires, and say so in the commit message.
 
+Four additions:
+
+- **Skips are not passes.** Every skipped check is counted and reported, and the
+  run declares how many skips it expects. A skip whose precondition is not
+  explicitly expected on this host fails the build. A test harness that reports
+  "passed" for a check it did not run is worse than one that has no check.
+- **Derived state may affect cost, never results.** Caches, revision counters
+  and memoised digests live outside the hash, and a cold-cache run must produce
+  hashes identical to a warm-cache run. Any spec introducing a cache states how
+  that is checked.
+- **Every `SPEC-*` ID cited in code exists in `specs/`,** checked mechanically
+  in `Scripts/ci.sh` rather than by reading.
+- **Human approvals are recorded** in `docs/decisions/` with date, approver and
+  scope. An unrecorded approval did not happen.
+
+**Perf budgets state bytes touched per tick alongside ms/tick,**
+at the stated scenario scale. On a unified-memory SoC the CPU and GPU share one
+memory controller, so a ms/tick figure measured on one machine hides the ceiling
+the architecture actually hits, and offloading a bandwidth-bound pass to the GPU
+does not widen the pipe. A budget in bytes can also be checked against a design
+before the code exists, which is when it is cheapest to act on.
+
+## Scope of the access validator
+
+Stated plainly so no one mistakes its reach for its ambition. Today
+`validateAccess` compares the set of component *types* a system touched against
+the union of its declared reads and writes. It does not distinguish reads from
+writes, and it does not cover `MapStore` or the RNG streams — which is to say it
+covers none of the tile state M3 will mutate.
+
+Before the M3 spec freezes, declarations distinguish reads from writes and
+extend to non-component resources, and the recorder must be safe to call from
+inside a parallel body or must trap loudly when it is not. Until that lands,
+this section is the honest statement of coverage and the constitution does not
+imply more.
+
 ## Governance
 
 - This constitution supersedes all other practice. Where `CLAUDE.md`, a spec, or
@@ -140,4 +263,4 @@ load-bearing and nobody remembers it was a guess.
   within an approved milestone may proceed on reviewer sign-off.
 - Compliance is checked at every merge. `Scripts/ci.sh` is the merge gate.
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-26 | **Last Amended**: 2026-07-26
+**Version**: 1.1.0 | **Ratified**: 2026-07-26 | **Last Amended**: 2026-07-27
