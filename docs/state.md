@@ -12,22 +12,15 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
 | Branch | `investigate/ki-001` (PR #5), off `main` after PR #4 merged. `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | **KI-001 root-caused and mitigated** (PR #5). Before that: constitution v1.1.0 drafted and submitted for approval (`docs/decisions/0003`, PR #4 merged — the draft is landed, the amendment is *not* enacted); review remediation P0 batch via PR #3. |
-| Next | **Owner approval of `docs/decisions/0003`** — blocked on a human; nothing else depends on it. Unblocked meanwhile: M1 phases 4–5 (window, camera, click-to-designate), and P1 backlog items 8–12, which gate the M3 spec freeze. |
+| Last completed | **Constitution v1.1.0 approved in full and in force** (`docs/decisions/0003`). Before that: KI-001 root-caused and mitigated (PR #5); review remediation P0 batch (PR #3). |
+| Next | **M1 phases 4–5** (window, camera, click-to-designate) — nothing is blocked. Then P1 backlog items 8–12, which gate the M3 spec freeze, and which v1.1.0 now makes mandatory rather than advisory. |
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
 ## Pending owner approvals
 
-- **Constitution v1.1.0 — `docs/decisions/0003`, submitted 2026-07-27.** Proposed
-  text is `.specify/memory/constitution-v1.1.0-draft.md`; `constitution.md` stays
-  v1.0.0 and in force until approved. Nine clauses in three groups: (A) four that
-  codify mechanisms the P0 batch already built, (B) five forward-looking rules
-  that gate M3/M4/M6 — including Invariant VI, adopted in principle by 0002 and
-  worded here, (C) two optional additions raised this session (Invariant I
-  extended to the *processor*, barring GPU-float/Core ML from sim state; and
-  bytes-per-tick alongside ms/tick in perf budgets). Groups can be approved
-  independently. Migration impact: none retroactive, no fixture moves.
+- **None.** Constitution v1.1.0 approved in full and applied 2026-07-27
+  (`docs/decisions/0003`). Next approval gate is the M2 milestone spec.
 
 
 ## Open work queues
@@ -68,6 +61,17 @@ before re-blessing. When parallel agents exist, split this table.
   Sole owner of the fixture per the table above; recorded here before re-blessing.
 
 ## Session log (newest first, keep last ~5)
+
+- 2026-07-27: **Constitution v1.1.0 approved in full by the owner and applied.**
+  All nine clauses, Groups A–C; `constitution.md` is v1.1.0 and the draft file
+  is deleted so only one copy of the rules exists. Live consequences to respect
+  from now on: **Invariant VI blocks any new serialized format until the
+  sectioned container exists, so M4 worldgen serialization is gated**; stencils
+  must double-buffer (M3); partition-order merge is not conflict resolution, so
+  M6 fluids must state a commutative rule or run serially; `SymbolID` must be
+  content-addressed or an append-only serialized table before the first
+  generated name; perf budgets state bytes/tick alongside ms/tick; and
+  Invariant I now bars GPU float and Core ML/ANE from producing sim state.
 
 - 2026-07-27: **KI-001 root-caused and mitigated** (PR #5, `investigate/ki-001`).
   Swift 6.3.3 leaves `MTLBuffer.contents()` in `x21`, the arm64 `swifterror`
