@@ -63,7 +63,8 @@ fail is not a requirement.
 Non-negotiable per Constitution I–III. State explicitly:
 
 - **DR-001**: Given identical commands, this milestone MUST produce identical
-  per-tick state hashes across runs and across `--threads 1,2,4`.
+  per-tick state hashes across runs and across every thread count
+  `determinism-check` defaults to (`1,2,3,7,16,64`).
 - **DR-002**: [any milestone-specific determinism obligation, e.g. "chunk
   generation MUST be independent of generation order"]
 

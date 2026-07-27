@@ -44,7 +44,7 @@ step "Determinism across partition counts"
 for scenario in small-dig 200-dwarves; do
   echo "--- $scenario"
   swift run -c release dfsim determinism-check \
-    --scenario "$scenario" --ticks 3000 --threads 1,2,4 \
+    --scenario "$scenario" --ticks 3000 --threads 1,2,3,7,16,64 \
     || fail "determinism-check $scenario"
 done
 

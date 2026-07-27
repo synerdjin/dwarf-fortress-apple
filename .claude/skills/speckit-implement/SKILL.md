@@ -150,7 +150,7 @@ You **MUST** consider the user input before proceeding (if not empty).
    ```bash
    Scripts/ci.sh
    swift run dfsim replay Fixtures/replays/smoke.rec --assert-hashes
-   swift run dfsim determinism-check --threads 1,2,4
+   swift run dfsim determinism-check
    swift run dfsim bench --scenario 200-dwarves --ticks 10000
    ```
 
