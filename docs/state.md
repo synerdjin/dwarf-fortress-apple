@@ -10,12 +10,12 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `main` (PR #1 merged; `m1-metal-tilemap-renderer` still exists remotely, fast-forwarded to match `main`, safe to branch from or delete) |
-| Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md` |
-| Last completed | M1 phases 1–3 (snapshot boundary, tilemap renderer, headless capture), merged to `main` via PR #1 |
-| Next | Review remediation **P0 batch first** (`docs/decisions/0002`): install scaffolding patches, then backlog items 1–7 in `docs/review-2026-07-27.md` §7. Then constitution v1.1.0 approval. Then M1 phases 4–5 (window, camera, click-to-designate). |
-| Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3 |
-| Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml`, mirrors `Scripts/ci.sh` verbatim. |
+| Branch | `remediation/p0-batch`, off `main`. Awaiting PR/review. `m1-metal-tilemap-renderer` still exists remotely, fast-forwarded to `main`. |
+| Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
+| Last completed | Review remediation **P0 batch complete** (backlog items 1–7 + scaffolding patches). Before that: M1 phases 1–3, merged via PR #1. |
+| Next | Constitution v1.1.0 approval — the P0 batch is now the evidence `docs/decisions/0002` required. Then M1 phases 4–5 (window, camera, click-to-designate). |
+| Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3, now P1 backlog item 13 |
+| Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
 ## Pending owner approvals
 
@@ -26,8 +26,12 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 
 ## Open work queues
 
-- Remediation backlog: `docs/review-2026-07-27.md` §7 (P0 items first)
-- Scaffolding patches awaiting install: `scaffolding-patches/README.md`
+- Remediation backlog: `docs/review-2026-07-27.md` §7. **P0 (1–7) done.** P1
+  (8–14) is next after the v1.1.0 amendments; items 8–12 gate the M3 spec freeze.
+- Deviations from the backlog as written, both argued in their commits:
+  item 3 unified rounding on truncate-toward-zero rather than floor (floor
+  cannot satisfy the negation identity the item asks for); item 5 hashed the
+  pending command queue rather than documenting the boundary.
 
 ## Ownership
 
@@ -59,6 +63,16 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: **P0 remediation batch complete** on `remediation/p0-batch`, six
+  commits, `Scripts/ci.sh` green (exit 0) end to end. Skills installed and
+  `scaffolding-patches/` retired; `determinism-check` widened to
+  `1,2,3,7,16,64`; `Fixed` rounding unified on truncate-toward-zero and the
+  `rounded` wrapping add fixed; counted `skip()` + `--max-skips` so a skip can
+  no longer read as a pass; pending commands hashed (**smoke.rec re-recorded**,
+  see Golden-hash changes); five ci.sh gates closed. Every new guard was broken
+  once and observed to fire — output quoted in each commit message. Next agent:
+  the constitution v1.1.0 amendments are now unblocked and are the next thing
+  the owner is waiting on.
 - 2026-07-27: PR #1 merged into `main`. Local and remote `main` and
   `m1-metal-tilemap-renderer` are all fast-forwarded to the same commit
   (`72c4318`) -- no divergence, safe starting point for the next session.
