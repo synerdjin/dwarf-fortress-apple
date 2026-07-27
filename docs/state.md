@@ -69,6 +69,16 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: **KI-001 root-caused and mitigated** (PR #5, `investigate/ki-001`).
+  Swift 6.3.3 leaves `MTLBuffer.contents()` in `x21`, the arm64 `swifterror`
+  register, on a path that never throws; the caller reads non-null `x21` as a
+  thrown error and traps in `_swift_getClass`. Confirmed by direct register
+  reads at the caller's error checks and by predicting, then measuring, that the
+  bogus error pointer's mapped region scales with the instance buffer. The
+  `rethrows` hypothesis from review §5.3 is **refuted** (arrangement C).
+  `uploadInstances` is now non-throwing — the only change that survived the
+  worst arrangement, 15/15 trapping to 0/15. Still a workaround, not a cure, and
+  not yet filed upstream. The release-capture gate was observed firing.
 - 2026-07-27: Constitution v1.1.0 drafted and submitted (`docs/decisions/0003`,
   draft text in `.specify/memory/constitution-v1.1.0-draft.md`); **nothing
   applied — the constitution remains v1.0.0 pending owner approval.** Baseline
