@@ -122,12 +122,33 @@ public final class TilemapRenderer {
   public let atlas: GlyphAtlas
   private let pipeline: MTLRenderPipelineState
   private let commandQueue: MTLCommandQueue
-  private var instanceBuffer: MTLBuffer?
-  private var instanceCapacity = 0
+
+  /// One instance buffer per frame that may be in flight.
+  ///
+  /// A single shared buffer was safe only because every caller was `capture`,
+  /// which does `waitUntilCompleted` before returning -- the GPU was always
+  /// done reading before the CPU overwrote it. A display-link loop does not
+  /// wait, so with one buffer the CPU would rewrite next frame's instances into
+  /// memory the GPU is still sampling for the current one. The visible symptom
+  /// is a torn or flickering frame under load rather than a crash, which is
+  /// exactly the kind of defect an agent cannot see.
+  ///
+  /// The buffers rotate per `draw`. The contract that makes that sufficient is
+  /// on the caller: **at most `maxFramesInFlight` command buffers may be
+  /// outstanding at once.** `DisplayLoop` holds a semaphore of exactly this
+  /// value; `capture` satisfies it trivially by waiting.
+  private var instanceBuffers: [MTLBuffer?]
+  private var instanceCapacities: [Int]
+  private var frameSlot = 0
+
+  /// How many frames may be in flight before a caller must wait.
+  public static let maxFramesInFlight = 3
 
   public static let pixelFormat: MTLPixelFormat = .bgra8Unorm
 
   public init(device: MTLDevice? = nil) throws {
+    instanceBuffers = Array(repeating: nil, count: TilemapRenderer.maxFramesInFlight)
+    instanceCapacities = Array(repeating: 0, count: TilemapRenderer.maxFramesInFlight)
     guard let device = device ?? MTLCreateSystemDefaultDevice() else {
       throw RenderError.noDevice
     }
@@ -168,7 +189,10 @@ public final class TilemapRenderer {
     commandBuffer: MTLCommandBuffer
   ) throws {
     guard !snapshot.isEmpty else { return }
-    uploadInstances(snapshot.instances)
+    // Rotate before uploading, so this frame writes to a buffer no in-flight
+    // command buffer is still reading. See `instanceBuffers`.
+    frameSlot = (frameSlot + 1) % TilemapRenderer.maxFramesInFlight
+    uploadInstances(snapshot.instances, into: frameSlot)
 
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = target
@@ -191,7 +215,7 @@ public final class TilemapRenderer {
         glyphCount: UInt32(atlas.glyphCount),
         layerOffset: UInt32(layer * perLayer)
       )
-      encoder.setVertexBuffer(instanceBuffer, offset: 0, index: 0)
+      encoder.setVertexBuffer(instanceBuffers[frameSlot], offset: 0, index: 0)
       encoder.setVertexBytes(&uniforms, length: MemoryLayout<Uniforms>.stride, index: 1)
       encoder.drawPrimitives(
         type: .triangleStrip,
@@ -280,11 +304,11 @@ public final class TilemapRenderer {
   ///
   /// A buffer allocation failure is unrecoverable and has no caller that could
   /// act on it, so it is a precondition rather than a thrown error.
-  private func uploadInstances(_ instances: [TileInstance]) {
+  private func uploadInstances(_ instances: [TileInstance], into slot: Int) {
     let byteCount = instances.count * MemoryLayout<TileInstance>.stride
     guard byteCount > 0 else { return }
 
-    if instanceCapacity < byteCount || instanceBuffer == nil {
+    if instanceCapacities[slot] < byteCount || instanceBuffers[slot] == nil {
       // `.storageModeShared` is the unified-memory payoff: the CPU writes and
       // the GPU reads the same pages, with no staging copy or upload step.
       guard
@@ -292,11 +316,11 @@ public final class TilemapRenderer {
       else {
         preconditionFailure("MTLDevice.makeBuffer returned nil for \(byteCount) bytes")
       }
-      instanceBuffer = buffer
-      instanceCapacity = buffer.length
+      instanceBuffers[slot] = buffer
+      instanceCapacities[slot] = buffer.length
     }
 
-    guard let buffer = instanceBuffer else {
+    guard let buffer = instanceBuffers[slot] else {
       preconditionFailure("instance buffer missing after allocation")
     }
     let destination = buffer.contents()

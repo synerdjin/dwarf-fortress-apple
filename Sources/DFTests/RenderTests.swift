@@ -214,6 +214,36 @@ func registerRenderTests() {
       expectEqual(first.height, 128)
     }
 
+    test("SPEC-M1-VIEW: every in-flight instance buffer renders identically") {
+      // The renderer rotates through `maxFramesInFlight` instance buffers so a
+      // display-link loop cannot overwrite instances the GPU is still reading.
+      // Rotation is only correct if every slot is sized and filled the same
+      // way: a slot that never grew, or that kept a stale buffer, would draw a
+      // different frame from the same snapshot. Capturing one full cycle plus
+      // one wraparound puts every slot on the hook.
+      guard let renderer = makeRendererOrSkip() else { return }
+      let fortress = Fortress.make(
+        scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+      fortress.run(ticks: 600)
+      let camera = Camera(origin: Coord3(0, 0, 6), size: Coord3(32, 16, 1), depthLayers: 1)
+      let snapshot = fortress.snapshot(camera: camera)
+
+      var hashes: [UInt64] = []
+      for _ in 0...TilemapRenderer.maxFramesInFlight {
+        do {
+          hashes.append(try renderer.capture(snapshot, pixelsPerTile: 8).pixelHash)
+        } catch {
+          expect(false, "capture failed: \(error)")
+          return
+        }
+      }
+      expectEqual(hashes.count, TilemapRenderer.maxFramesInFlight + 1)
+      expect(
+        hashes.allSatisfy { $0 == hashes[0] },
+        "instance buffer slots disagreed about the same snapshot: \(hashes)"
+      )
+    }
+
     test("SC-002: the capture agrees with the ASCII dump about what is dug") {
       // The requirement that keeps `shot` honest. If the GPU path and the text
       // path disagree about which tiles are floor, one of them is lying and an
