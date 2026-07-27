@@ -16,5 +16,30 @@ registerMapStoreTests()
 registerRenderTests()
 
 // `dftest Fixed` runs only matching suites and tests.
-let filter = CommandLine.arguments.dropFirst().first
-exit(runRegisteredSuites(filter: filter))
+// `dftest --max-skips 0` fails the run if any test skipped; the merge gate uses
+// it, because a skip that nobody counts is how "the GPU tests stopped running"
+// looks exactly like a green build.
+var filter: String?
+var maxSkips: Int?
+var remaining = Array(CommandLine.arguments.dropFirst())
+while let argument = remaining.first {
+  remaining.removeFirst()
+  if argument == "--max-skips" {
+    guard let value = remaining.first.flatMap(Int.init) else {
+      print("dftest: --max-skips needs a number")
+      exit(2)
+    }
+    remaining.removeFirst()
+    maxSkips = value
+  } else if argument.hasPrefix("--") {
+    print("dftest: unknown option \(argument)")
+    exit(2)
+  } else if filter == nil {
+    filter = argument
+  } else {
+    print("dftest: unexpected argument \(argument)")
+    exit(2)
+  }
+}
+
+exit(runRegisteredSuites(filter: filter, maxSkips: maxSkips))

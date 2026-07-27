@@ -9,6 +9,18 @@ cd "$(dirname "$0")/.."
 step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
 fail() { printf '\033[31mFAILED: %s\033[0m\n' "$1"; exit 1; }
 
+# The target platform is Apple Silicon, which always has a Metal device, so the
+# default is that GPU work must run. Set CI_ALLOW_NO_GPU=1 only on a runner that
+# genuinely has none (the GitHub hosted macOS runners do not) -- and know that
+# it downgrades real coverage, so a green run under it proves less.
+: "${CI_ALLOW_NO_GPU:=0}"
+if [ "$CI_ALLOW_NO_GPU" = "1" ]; then
+  max_skips=99
+  printf '\033[33mCI_ALLOW_NO_GPU=1: GPU tests may skip; this run proves less.\033[0m\n'
+else
+  max_skips=0
+fi
+
 step "Build (debug)"
 swift build || fail "debug build"
 
@@ -16,13 +28,16 @@ step "Build (release)"
 swift build -c release || fail "release build"
 
 step "Unit tests (debug)"
-swift run dftest || fail "unit tests (debug)"
+# --max-skips is what stops a skip from reading as a pass. `expect(true,
+# "skipped")` used to print a ✓ and exit 0, so "the GPU tests stopped running"
+# and "the GPU tests passed" were the same observation.
+swift run dftest --max-skips "$max_skips" || fail "unit tests (debug)"
 
 step "Unit tests (release)"
 # Debug and release are demonstrably different programs here -- see
 # docs/known-issues.md KI-001, a release-only crash that hid for two milestones
 # because only debug was routinely exercised. Both configurations are gates.
-swift run -c release dftest || fail "unit tests (release)"
+swift run -c release dftest --max-skips "$max_skips" || fail "unit tests (release)"
 
 step "Replay fixtures"
 # Golden hashes are contracts between agents. If your change moves them, that is

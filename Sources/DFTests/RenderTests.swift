@@ -3,7 +3,6 @@ import DFECS
 import DFRender
 import DFSim
 import DFTesting
-import Foundation
 import Metal
 
 func registerRenderTests() {
@@ -142,7 +141,7 @@ func registerRenderTests() {
   suite("SPEC-M1-VIEW: Glyph atlas and tileset") {
     test("Every glyph is drawn and the atlas is stable") {
       guard let device = MTLCreateSystemDefaultDeviceOrNil() else {
-        expect(true, "no GPU available; atlas test skipped")
+        skip("no Metal device on this machine")
         return
       }
       guard let atlas = try? GlyphAtlas(device: device) else {
@@ -193,20 +192,20 @@ func registerRenderTests() {
 
   suite("SPEC-M1-VIEW: Headless capture") {
     test("SC-003: two captures of the same state are byte-identical") {
-      guard let renderer = try? TilemapRenderer() else {
-        expect(true, "no GPU available; capture test skipped")
-        return
-      }
+      guard let renderer = makeRendererOrSkip() else { return }
       let fortress = Fortress.make(
         scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
       fortress.run(ticks: 600)
       let camera = Camera(origin: Coord3(0, 0, 6), size: Coord3(32, 16, 1), depthLayers: 1)
       let snapshot = fortress.snapshot(camera: camera)
 
-      guard let first = try? renderer.capture(snapshot, pixelsPerTile: 8),
-        let second = try? renderer.capture(snapshot, pixelsPerTile: 8)
-      else {
-        expect(false, "capture failed")
+      let first: CapturedImage
+      let second: CapturedImage
+      do {
+        first = try renderer.capture(snapshot, pixelsPerTile: 8)
+        second = try renderer.capture(snapshot, pixelsPerTile: 8)
+      } catch {
+        expect(false, "capture failed: \(error)")
         return
       }
       expectEqual(first.pixelHash, second.pixelHash)
@@ -219,10 +218,7 @@ func registerRenderTests() {
       // The requirement that keeps `shot` honest. If the GPU path and the text
       // path disagree about which tiles are floor, one of them is lying and an
       // agent cannot trust either.
-      guard let renderer = try? TilemapRenderer() else {
-        expect(true, "no GPU available; agreement test skipped")
-        return
-      }
+      guard let renderer = makeRendererOrSkip() else { return }
       let fortress = Fortress.make(
         scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
       fortress.run(ticks: 4000)
@@ -232,9 +228,11 @@ func registerRenderTests() {
       let height: Int32 = 24
       let camera = Camera(
         origin: Coord3(0, 0, z), size: Coord3(width, height, 1), depthLayers: 0)
-      guard let image = try? renderer.capture(fortress.snapshot(camera: camera), pixelsPerTile: 8)
-      else {
-        expect(false, "capture failed")
+      let image: CapturedImage
+      do {
+        image = try renderer.capture(fortress.snapshot(camera: camera), pixelsPerTile: 8)
+      } catch {
+        expect(false, "capture failed: \(error)")
         return
       }
 
@@ -260,10 +258,7 @@ func registerRenderTests() {
     }
 
     test("A zero-sized capture is refused, not attempted") {
-      guard let renderer = try? TilemapRenderer() else {
-        expect(true, "no GPU available; skipped")
-        return
-      }
+      guard let renderer = makeRendererOrSkip() else { return }
       let empty = FrameSnapshot(
         instances: [], camera: Camera(size: Coord3(0, 0, 1)), tick: 0, stateHash: 0)
       var threw = false
@@ -278,4 +273,25 @@ func registerRenderTests() {
 /// that lacks Metal entirely.
 func MTLCreateSystemDefaultDeviceOrNil() -> MTLDevice? {
   MTLCreateSystemDefaultDevice()
+}
+
+/// Builds a renderer, distinguishing "this machine has no GPU" from "the
+/// renderer is broken".
+///
+/// These call sites used `try? TilemapRenderer()`, which conflated the two:
+/// a shader that stopped compiling, a pipeline that could not be created, a
+/// texture allocation that failed -- every one of them read as "no GPU
+/// available", and the test then reported a pass. `RenderError.noDevice` is
+/// the only environmental case. Everything else is precisely the defect these
+/// tests exist to catch, so it fails, loudly, with the error attached.
+func makeRendererOrSkip() -> TilemapRenderer? {
+  do {
+    return try TilemapRenderer()
+  } catch RenderError.noDevice {
+    skip("no Metal device on this machine")
+    return nil
+  } catch {
+    expect(false, "TilemapRenderer init failed, and not for want of a GPU: \(error)")
+    return nil
+  }
 }
