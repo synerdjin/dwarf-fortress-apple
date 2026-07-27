@@ -12,8 +12,8 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
 | Branch | `investigate/ki-001` (PR #5), off `main` after PR #4 merged. `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | **Constitution v1.1.0 approved in full and in force** (`docs/decisions/0003`). Before that: KI-001 root-caused and mitigated (PR #5); review remediation P0 batch (PR #3). |
-| Next | **M1 phases 4–5** (window, camera, click-to-designate) — nothing is blocked. Then P1 backlog items 8–12, which gate the M3 spec freeze, and which v1.1.0 now makes mandatory rather than advisory. |
+| Last completed | **M1 phases 4–5 (T011–T017)**: DFUI, window, camera, click-to-designate, UI-session fixture, snapshot benches, CI gates. Before that: constitution v1.1.0 in force; KI-001 root-caused. |
+| Next | Owner decision on the PC-001/PC-002 conflict below, then **P1 backlog items 8–12**, which gate the M3 spec freeze and which v1.1.0 makes mandatory rather than advisory. Item 9 is now also the fix for the snapshot cost. |
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
@@ -75,6 +75,21 @@ before re-blessing. When parallel agents exist, split this table.
   Sole owner of the fixture per the table above; recorded here before re-blessing.
 
 ## Session log (newest first, keep last ~5)
+
+- 2026-07-27: **M1 phases 4–5 complete** (T011–T017). New `DFUI` target that
+  deliberately cannot import `DFECS`, so Constitution III is enforced by the
+  module graph; new `dwarffortress` window executable, the only target linking
+  AppKit. Instance buffers now rotate per in-flight frame (review §5.2), with
+  the caller contract stated and a test that breaks if any slot is unfilled.
+  `dfsim ui-session` records a scripted-input fixture; it replays 20/20.
+  **Two things the next agent must not rediscover the hard way:** the plan's
+  snapshot Cost Control paragraph describes a dirty-flag optimization that was
+  never implemented, and as a result PC-001 and PC-002 are not jointly
+  satisfiable — see Pending owner decisions. **Also unverified: nobody has
+  looked at the window.** It runs for minutes without error and its threads
+  behave, but a bare executable has no bundle for screenshot tooling and
+  `screencapture` lacked permission, so NSEvent translation and CAMetalLayer
+  presentation are untested by anything. `swift run dwarffortress` to look.
 
 - 2026-07-27: **Constitution v1.1.0 approved in full by the owner and applied.**
   All nine clauses, Groups A–C; `constitution.md` is v1.1.0 and the draft file
