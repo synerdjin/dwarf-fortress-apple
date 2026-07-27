@@ -1,7 +1,9 @@
 # Milestone Specification: M0 — Foundations
 
-**ID**: `SPEC-M0` (areas: `SPEC-M0-CORE`, `SPEC-M0-ECS`) | **Date**: 2026-07-26
-| **Status**: Approved (retroactive) · **Milestone complete** 2026-07-26
+**ID**: `SPEC-M0` (areas: `SPEC-M0-CORE`, `SPEC-M0-ECS`, `SPEC-M0-MAP`,
+`SPEC-M0-SIM`) | **Date**: 2026-07-26 | **Status**: Approved (retroactive) ·
+**Milestone complete** 2026-07-26 · **Amended** 2026-07-27 (areas `SPEC-M0-MAP`
+and `SPEC-M0-SIM` declared — see the amendment note below)
 
 > **Written after implementation.** M0 was built directly from the approved
 > architecture plan, before the Spec Kit pipeline existed — the pipeline is
@@ -13,6 +15,18 @@
 > Every milestone from M1 onward runs the pipeline in the correct order:
 > requirements frozen, then design, then code. M0 is the only exception and it
 > is labelled as one rather than quietly presented as process-compliant.
+
+> **Amendment, 2026-07-27** (P0 backlog item 1, `docs/review-2026-07-27.md`
+> §5.1.7). The original header declared two areas while `MapStoreTests.swift`
+> cited four: `SPEC-M0-MAP` and `SPEC-M0-SIM` were dangling IDs that no spec
+> declared. The behaviour they name was always covered here — by SC-008
+> (materialization), SC-010 and DR-001 (replay and hash stability), DR-002
+> (partition independence) — but the requirement text was filed under areas
+> that did not exist, so the traceability was real and unfollowable. This
+> amendment declares the two areas and writes down the requirements the
+> existing tests verify. It adds no new obligation: every FR below was already
+> shipped and tested at M0 completion. `Scripts/ci.sh` now fails on a dangling
+> ID, so this class of drift cannot recur silently.
 
 ## Consumer Scenarios & Testing *(mandatory)*
 
@@ -154,6 +168,42 @@ cannot run the tests cannot do the work.
   registration order breaking ties within a phase.
 - **FR-027**: Systems MUST declare read/write component sets, and debug builds
   MUST trap when a system touches an undeclared type.
+
+### Functional Requirements — `SPEC-M0-MAP`
+
+*(Declared by the 2026-07-27 amendment; verified by `SPEC-M0-MAP` suites in
+`MapStoreTests.swift` since M0 completion.)*
+
+- **FR-030**: `Tile` MUST be exactly 8 bytes with no compiler-inserted padding,
+  and its raw encodings MUST be frozen, since they are hashed and serialized.
+- **FR-031**: The map MUST store blocks as flat 16×16×1 slabs, and a fresh map
+  MUST hold no tile storage at all.
+- **FR-032**: A block MUST materialize only on a write that breaks its
+  uniformity, and MUST collapse back to uniform when it becomes uniform again.
+  Writing the value a uniform block already holds MUST NOT materialize it.
+- **FR-033**: Out-of-bounds reads MUST return solid wall rather than trapping,
+  so callers near a map edge need no special case.
+- **FR-034**: Map hashing MUST be independent of how a given map was built,
+  MUST detect any single changed tile, and MUST be unaffected by which blocks
+  happen to be materialized.
+- **FR-035**: `Block.revision` MUST advance on changes that affect passability
+  and MUST NOT advance on purely cosmetic ones.
+
+### Functional Requirements — `SPEC-M0-SIM`
+
+*(Declared by the 2026-07-27 amendment; verified by `SPEC-M0-SIM` suites in
+`MapStoreTests.swift` since M0 completion.)*
+
+- **FR-040**: A replay MUST round-trip through its binary form byte for byte,
+  including the empty case, and MUST reject malformed input rather than
+  misreading it.
+- **FR-041**: The command queue MUST drain in submission order, and the
+  recording MUST preserve that order with each command's tick.
+- **FR-042**: `Fortress.stateHash` MUST cover every input to a future tick,
+  including undrained commands. It MUST NOT cover the recording, which is
+  present while recording a fixture and absent while replaying one.
+- **FR-043**: Designated tiles MUST actually be excavated — a deterministic
+  simulation that does nothing satisfies every other requirement here.
 
 ### Determinism Requirements
 
