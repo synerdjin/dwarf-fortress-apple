@@ -21,9 +21,39 @@ final class FrameDrawer: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendab
   private let renderer: TilemapRenderer
   private let ring: FrameSnapshotRing
 
+  /// Frames actually presented, and when the count was last reported.
+  ///
+  /// **Set `DF_FRAME_LOG=1` to print a frame rate to stderr once a second.**
+  ///
+  /// This exists because "the window is drawing" was, until it wasn't, a thing
+  /// only a human looking at the screen could tell. A run-loop bug stopped
+  /// every frame while the process stayed alive, reported no error, and merely
+  /// used *less* CPU -- which reads as an optimization working. Constitution V
+  /// says a subsystem that can only be checked by looking at it is one an agent
+  /// cannot verify; this is the cheapest thing that makes drawing observable
+  /// from a terminal.
+  private var presentedFrames = 0
+  private var lastReport = Date()
+  private let logFrames = ProcessInfo.processInfo.environment["DF_FRAME_LOG"] != nil
+
   init(renderer: TilemapRenderer, ring: FrameSnapshotRing) {
     self.renderer = renderer
     self.ring = ring
+  }
+
+  /// Total frames presented since launch. Read from the render thread only.
+  var frameCount: Int { presentedFrames }
+
+  private func countFrame() {
+    presentedFrames += 1
+    guard logFrames else { return }
+    let now = Date()
+    let elapsed = now.timeIntervalSince(lastReport)
+    guard elapsed >= 1 else { return }
+    FileHandle.standardError.write(
+      Data("frames \(presentedFrames) (\(Int(Double(presentedFrames) / elapsed)) fps)\n".utf8))
+    presentedFrames = 0
+    lastReport = now
   }
 
   func metalDisplayLink(
@@ -49,6 +79,7 @@ final class FrameDrawer: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendab
     }
     commandBuffer.present(update.drawable)
     commandBuffer.commit()
+    countFrame()
   }
 }
 
@@ -111,11 +142,16 @@ final class FortressView: NSView {
     let thread = Thread { [drawer] in
       let link = CAMetalDisplayLink(metalLayer: layerForLink)
       link.delegate = drawer
+      // Added to `.common` so the link keeps firing across mode switches, but
+      // *run* in `.default`. `.common` is a pseudo-mode -- a named set that
+      // sources can be registered against -- and `run(mode:before:)` given it
+      // finds no such mode, returns false immediately, and falls straight out
+      // of the loop below. That is not a subtle failure: the thread exits, the
+      // link is invalidated, and the window stays blank forever while the
+      // process looks healthy and simply uses less CPU.
       link.add(to: .current, forMode: .common)
-      // The link retains itself in the run loop; this parks the thread until
-      // `invalidate()` lets the run loop drain and return.
       while !Thread.current.isCancelled,
-        RunLoop.current.run(mode: .common, before: .distantFuture) {}
+        RunLoop.current.run(mode: .default, before: .distantFuture) {}
       link.invalidate()
     }
     thread.name = "render"
