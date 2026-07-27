@@ -56,8 +56,22 @@ public final class JobSystem: @unchecked Sendable {
   /// debugging sessions where a real stack trace beats a parallel one.
   public var forceSerial: Bool
 
-  public init(forceSerial: Bool = false) {
+  /// Overrides the partition count for every dispatch that does not name one.
+  ///
+  /// This is what `dfsim determinism-check --threads 1,2,4` actually varies.
+  /// Without it the check would be vacuous: thread *count* is not something a
+  /// caller controls under `concurrentPerform`, but the decomposition is, and
+  /// the decomposition is what a correct system must be invariant to.
+  public var partitionCountOverride: Int?
+
+  public init(forceSerial: Bool = false, partitionCountOverride: Int? = nil) {
     self.forceSerial = forceSerial
+    self.partitionCountOverride = partitionCountOverride
+  }
+
+  /// Partitions to use when a call site does not specify.
+  func resolvedPartitionCount(_ requested: Int?, _ workload: Workload) -> Int {
+    requested ?? partitionCountOverride ?? workload.defaultPartitionCount
   }
 
   // MARK: - Partitioning
@@ -99,7 +113,7 @@ public final class JobSystem: @unchecked Sendable {
     partitionCount: Int? = nil,
     _ body: @Sendable (Range<Int>, Int) -> Void
   ) {
-    let count = partitionCount ?? workload.defaultPartitionCount
+    let count = resolvedPartitionCount(partitionCount, workload)
     let partitions = JobSystem.partition(range, into: count)
     guard !partitions.isEmpty else { return }
 
@@ -138,7 +152,7 @@ public final class JobSystem: @unchecked Sendable {
     body: @Sendable (Range<Int>, Int, inout Scratch) -> Void,
     merge: (inout Scratch, Int) -> Void
   ) {
-    let count = partitionCount ?? workload.defaultPartitionCount
+    let count = resolvedPartitionCount(partitionCount, workload)
     let partitions = JobSystem.partition(range, into: count)
     guard !partitions.isEmpty else { return }
 

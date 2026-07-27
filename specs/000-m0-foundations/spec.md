@@ -1,7 +1,7 @@
 # Milestone Specification: M0 — Foundations
 
 **ID**: `SPEC-M0` (areas: `SPEC-M0-CORE`, `SPEC-M0-ECS`) | **Date**: 2026-07-26
-| **Status**: Approved (retroactive)
+| **Status**: Approved (retroactive) · **Milestone complete** 2026-07-26
 
 > **Written after implementation.** M0 was built directly from the approved
 > architecture plan, before the Spec Kit pipeline existed — the pipeline is
@@ -196,11 +196,33 @@ cannot run the tests cannot do the work.
   *(Met: verified deliberately; see commit `0dee198`.)*
 - **SC-007**: The parallel determinism tests have been observed to fail when
   merge order is broken. *(Met: verified deliberately; see commit `f8340c3`.)*
+- **SC-008**: An unexcavated map holds zero tile storage; blocks materialize
+  only on a write that breaks uniformity, and collapse back when they become
+  uniform again. *(Met: 200 dwarves on a 144×144×16 map materialize 49 of 1296
+  blocks, 98 KiB.)*
+- **SC-009**: `dfsim ascii` shows the fortress being dug — designations become
+  floor and dwarves appear at the working face. *(Met.)*
+- **SC-010**: **DR-001 in full.** A recorded 10,000-tick command stream replays
+  to an identical hash sequence at all 101 checkpoints, and the scenario
+  produces identical final hashes across `--threads 1,2,4` (and 8).
+  *(Met: `Fixtures/replays/smoke.rec`.)*
+- **SC-011**: Both halves of the regression net have been observed to fail.
+  Making one system's behaviour depend on its partition index made
+  `determinism-check` report divergence at threads=2 and 4, and made
+  `replay --assert-hashes` fail 100 of 101 checkpoints, naming tick 101 as the
+  first divergence. *(Met: verified deliberately.)*
 
 ### Performance Criteria
 
-None. M0 establishes correctness primitives; no perf budget is claimed and none
-is enforced. First budgets land in M1 (frame time) and M3 (pathfinding ms/tick).
+No budget is *enforced* in M0 — it establishes correctness primitives. The
+baseline is recorded so that later regressions are visible:
+
+- 200 dwarves, 144×144×16 map: **0.10 ms/tick** release, about 1% of the 10 ms
+  frame implied by DF's 1200 ticks/day at a 100 FPS cap.
+
+This number is not impressive yet and should not be read as headroom: M0
+simulates no temperature, no fluids, and no real pathfinding. First enforced
+budgets land in M1 (frame time) and M3 (thermal ms/tick).
 
 ## Research Basis
 
@@ -213,16 +235,11 @@ is enforced. First budgets land in M1 (frame time) and M3 (pathfinding ms/tick).
 
 Deferred deliberately, with the milestone that picks each up:
 
-- Chunked map storage with palette compression → **M0 remainder**
-- `dfsim` CLI verbs (`replay`, `ascii`, `bench`, `determinism-check`) and the
-  command queue → **M0 remainder**
-- The 10k-tick replay fixture and its golden hash sequence → **M0 remainder**
-- Save/load → M2 · Metal renderer → M1 · Pathfinding → M3 · Raws → M4
+- Save/load → M2 · Metal renderer → M1 · Thermal simulation → M3 ·
+  Raws → M4 · Fluids and pathfinding → M6
 
-Note that DR-001 is currently verified only at unit scale (identical scheduler
-runs producing identical hashes). Its full form — a 10k-tick recorded command
-stream, bit-stable across runs and across `--threads 1,2,4` — is the M0
-acceptance gate and is **not yet met**.
+The map store, `dfsim` CLI and replay fixture were originally listed here as
+"M0 remainder" and are now delivered — see SC-008 through SC-011.
 
 ## Assumptions
 

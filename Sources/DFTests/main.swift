@@ -12,6 +12,7 @@ registerCoordTests()
 registerJobSystemTests()
 registerECSTests()
 registerListStorageTests()
+registerMapStoreTests()
 
 // `dftest Fixed` runs only matching suites and tests.
 let filter = CommandLine.arguments.dropFirst().first
