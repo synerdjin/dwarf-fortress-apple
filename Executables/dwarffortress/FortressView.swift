@@ -63,7 +63,6 @@ final class FortressView: NSView {
   private let inputMap = InputMap()
   private let drawer: FrameDrawer
   private var controller: CameraController
-  private var displayLink: CAMetalDisplayLink?
   private var renderThread: Thread?
 
   /// Held rather than re-derived by casting `layer`: this class creates it, so
@@ -125,11 +124,12 @@ final class FortressView: NSView {
     renderThread = thread
   }
 
+  /// Signals the render thread to unwind. It invalidates its own link once the
+  /// run loop returns, which the next display callback wakes it to do — the
+  /// link is owned by that thread and must not be torn down from this one.
   func stopDrawing() {
     renderThread?.cancel()
     renderThread = nil
-    displayLink?.invalidate()
-    displayLink = nil
   }
 
   // MARK: - Sizing

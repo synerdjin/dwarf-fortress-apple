@@ -287,12 +287,24 @@ public final class TilemapRenderer {
 
     // Through the same admission control as every other caller, so slot
     // rotation stays sound even if a capture interleaves with a display loop.
-    // It cannot deadlock: it takes one of `maxFramesInFlight` slots and
-    // releases it via the completion handler the accessor attaches.
     guard let commandBuffer = makeCommandBuffer() else {
       throw RenderError.encodingFailed("command buffer")
     }
-    try draw(snapshot, into: target, commandBuffer: commandBuffer)
+    // Commit even when `draw` throws, so the completion handler that releases
+    // this buffer's frame slot is guaranteed to run.
+    //
+    // Measured, because the obvious reasoning is wrong: forcing `draw` to
+    // throw on five consecutive captures with only three slots does *not*
+    // deadlock without this — Metal appears to fire completion handlers when an
+    // uncommitted buffer deallocates. That behaviour is undocumented, so this
+    // does not depend on it; but the leak is a hazard being closed, not a bug
+    // that was observed.
+    do {
+      try draw(snapshot, into: target, commandBuffer: commandBuffer)
+    } catch {
+      commandBuffer.commit()
+      throw error
+    }
     commandBuffer.commit()
     commandBuffer.waitUntilCompleted()
 
