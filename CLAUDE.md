@@ -5,7 +5,7 @@ macOS on Apple Silicon. Swift 6, data-oriented ECS, Metal tilemap renderer.
 
 ## Read these first
 
-1. **`.specify/memory/constitution.md`** — the five invariants and the
+1. **`.specify/memory/constitution.md`** — the six invariants and the
    determinism rules. This is the authoritative source and it supersedes
    everything else, including this file. It is deliberately not restated here:
    two copies of a rule diverge, and whichever copy an agent happens to read

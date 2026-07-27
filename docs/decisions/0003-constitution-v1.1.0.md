@@ -2,11 +2,11 @@
 
 **Date raised**: 2026-07-27
 **Approver**: Djin (project owner)
-**Status**: ⏳ **REQUESTED — awaiting owner approval. Not in force.**
-**Proposed text**: `.specify/memory/constitution-v1.1.0-draft.md`
-**Applies on approval by**: replacing `.specify/memory/constitution.md` with the
-draft (minus its DRAFT banner and `[NEW v1.1.0]` markers) and setting this file's
-status to Approved.
+**Date approved**: 2026-07-27
+**Status**: ✅ **APPROVED IN FULL AND APPLIED.** The constitution is v1.1.0.
+**Applied by**: replacing `.specify/memory/constitution.md` with the proposed
+text (DRAFT banner and `[NEW v1.1.0]` markers stripped, version line set to
+1.1.0) and deleting `.specify/memory/constitution-v1.1.0-draft.md`.
 
 ## Context
 
@@ -119,5 +119,29 @@ presented separately so they can be declined without stalling the rest.
 
 ## Owner decision
 
-_Unfilled. Record approval, partial approval, or rejection here with date, then
-apply the draft and update `docs/state.md`._
+**Approved 2026-07-27 by Djin (project owner), in chat, in full — all nine
+clauses across Groups A, B and C.** No clause was declined or amended; the
+recommendation to treat Group C as separable was not exercised.
+
+Applied the same day. The constitution is now v1.1.0 and in force, and the
+draft file is deleted so only one copy of the rules exists — per the
+constitution's own reason for not restating itself in `CLAUDE.md`.
+
+**In force from this date**, with the consequences the request flagged:
+
+- Invariant VI blocks adding any new serialized format before the sectioned,
+  versioned container exists. **M4 cannot begin serializing worldgen output
+  until VI is implemented** — this is the one-way door, accepted knowingly.
+- Stencil double-buffering and the merge-is-not-conflict-resolution rule gate
+  the M3 and M6 specs respectively; both must be answered in the spec, not in
+  code.
+- `SymbolID` must be content-addressed or an append-only serialized table
+  before the first generated name.
+- Perf budgets must now state bytes touched per tick alongside ms/tick. The M1
+  budget table predates this clause and is not retroactively invalid, but the
+  next spec to touch it should add the column.
+- Invariant I now bars GPU float, Metal fast-math, SIMD-width-dependent
+  reductions and Core ML / Neural Engine inference from producing sim state.
+  Nothing in the tree violates this today.
+
+No code change was required by approval, and no golden hash moved.
