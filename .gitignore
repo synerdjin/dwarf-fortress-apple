@@ -1,0 +1,13 @@
+.build/
+.swiftpm/
+*.xcodeproj
+*.xcworkspace
+DerivedData/
+.DS_Store
+
+# Agent worktrees live here; they are real checkouts, not artifacts to commit.
+/worktrees/
+
+# Local bench output and captured frames.
+/out/
+*.trace
