@@ -2,6 +2,7 @@ import DFCore
 import DFECS
 import DFRender
 import DFSim
+import DFUI
 import Darwin
 import Foundation
 
@@ -249,13 +250,38 @@ case "bench":
   let ticks = arguments.int("ticks", default: 10000)
   let budget = arguments.string("budget-ms").flatMap(Double.init)
 
+  // PC-002: does publishing a snapshot every tick add more than 1 ms/tick?
+  // Measured by running the same scenario with the work switched on, because
+  // the requirement is about the delta a window imposes, not absolute cost.
+  let withSnapshot = arguments.bool("with-snapshot")
+  // Clamped to the map, as `CameraController` does for a real window. Without
+  // this a viewport larger than the map measures the cost of snapshotting
+  // empty space outside it, which no window ever shows and which would make
+  // the budget a number about nothing.
+  let renderCamera = Camera(
+    origin: Coord3(0, 0, Int32(scenario.mapSize.z) - 2),
+    size: Coord3(
+      min(Int32(arguments.int("width", default: 300)), scenario.mapSize.x),
+      min(Int32(arguments.int("height", default: 200)), scenario.mapSize.y),
+      1),
+    depthLayers: arguments.int("layers", default: 4))
+
   let fortress = Fortress.make(
     scenario: scenario, seed: seed, jobs: JobSystem(), isRecording: false)
   // Warm up so the measurement is not dominated by first-touch page faults.
   fortress.run(ticks: 100)
 
   let start = DispatchTime.now().uptimeNanoseconds
-  fortress.run(ticks: ticks)
+  if withSnapshot {
+    let ring = FrameSnapshotRing()
+    for _ in 0..<ticks {
+      fortress.step()
+      let snapshot = fortress.snapshot(camera: renderCamera)
+      ring.publish { $0 = snapshot }
+    }
+  } else {
+    fortress.run(ticks: ticks)
+  }
   let elapsed = DispatchTime.now().uptimeNanoseconds - start
 
   let msPerTick = Double(elapsed) / Double(ticks) / 1_000_000
@@ -271,10 +297,123 @@ case "bench":
   print("materialized blocks \(fortress.map.materializedBlockCount) of \(fortress.map.blockCount)")
   print("tile storage  \(fortress.map.tileStorageBytes / 1024) KiB")
 
+  // Constitution (Quality Gates, v1.1.0): budgets state bytes touched per tick
+  // alongside ms/tick. On a unified-memory SoC one controller serves CPU and
+  // GPU, so ms/tick measured on one machine hides the ceiling the architecture
+  // actually hits -- and unlike a time, this figure is comparable across
+  // machines and checkable against a design before the code exists.
+  if withSnapshot {
+    let instanceBytes =
+      renderCamera.tileCount * renderCamera.depthLayers
+      * MemoryLayout<TileInstance>.stride
+    print("camera        \(renderCamera.size.x)x\(renderCamera.size.y) x\(renderCamera.depthLayers) layers")
+    print("bytes/tick    \(instanceBytes) (\(instanceBytes / 1024) KiB of instances published)")
+    print(
+      String(
+        format: "bandwidth     %.2f GB/s at %d ticks/s",
+        Double(instanceBytes) * Double(SimulationHost.ticksPerSecond) / 1_000_000_000,
+        SimulationHost.ticksPerSecond))
+  }
+
   if let budget, msPerTick > budget {
     print(String(format: "FAIL: %.4f ms/tick exceeds budget of %.4f ms/tick", msPerTick, budget))
     exit(1)
   }
+
+// MARK: - ui-session
+
+case "ui-session":
+  // T014 / SC-004. Drives the real input path -- the same `InputMap` and
+  // `HitTest` the window uses -- from a scripted, deterministic gesture list,
+  // and records the resulting command stream as a replay fixture.
+  //
+  // The point is not to test clicking. It is to prove that input reaches the
+  // simulation *only* as commands: if a view action ever mutated state, or if
+  // hit testing were not a pure function of (click, camera, zoom), the
+  // recorded stream would not reproduce the run it came from, and
+  // `replay --assert-hashes` would say so.
+  let scenario = resolveScenario(arguments.string("scenario", default: "small-dig")!)
+  let seed = arguments.uint64("seed", default: 1)
+  let ticks = arguments.int("ticks", default: 2000)
+  let interval = arguments.int("hash-interval", default: 100)
+  guard let output = arguments.string("out") else { fail("ui-session requires --out <path>") }
+
+  let fortress = Fortress.make(scenario: scenario, seed: seed, jobs: JobSystem())
+  var controller = CameraController(
+    camera: Camera(
+      origin: Coord3(0, 0, Int32(scenario.mapSize.z) - 2),
+      size: Coord3(40, 24, 1),
+      depthLayers: 2),
+    pixelsPerTile: 8,
+    mapSize: scenario.mapSize)
+  let inputMap = InputMap()
+
+  // A fixed gesture script. Camera moves are interleaved with clicks on
+  // purpose: a click's meaning depends on where the camera is, so a bug that
+  // let a view action leak into state would change the designations that
+  // follow it and break the hashes downstream.
+  let script: [(tick: Int, stroke: KeyStroke?, click: Click?)] = [
+    (100, nil, Click(x: 84.0, y: 84.0)),
+    (200, KeyStroke(.right, shift: true), nil),
+    (300, nil, Click(x: 12.5, y: 36.9)),
+    (400, KeyStroke(.down), nil),
+    (500, nil, Click(x: 160.0, y: 100.0)),
+    (600, KeyStroke(.character("+")), nil),
+    (700, nil, Click(x: 200.0, y: 40.0)),
+    (800, KeyStroke(.pageDown), nil),
+    (900, nil, Click(x: 64.0, y: 64.0)),
+    (1000, KeyStroke(.left), nil),
+    (1100, nil, Click(x: 100.0, y: 150.0)),
+  ]
+
+  var checkpoints: [Replay.Checkpoint] = []
+  var scriptIndex = 0
+  for tick in 0..<ticks {
+    while scriptIndex < script.count, script[scriptIndex].tick == tick {
+      let entry = script[scriptIndex]
+      scriptIndex += 1
+      let action: InputAction
+      if let stroke = entry.stroke {
+        action = inputMap.action(for: stroke)
+      } else if let click = entry.click {
+        action = inputMap.action(
+          for: click, camera: controller.camera, pixelsPerTile: controller.pixelsPerTile)
+      } else {
+        continue
+      }
+      switch action {
+      case .view(let viewAction): controller.apply(viewAction)
+      case .fortress(let command): fortress.submit(command)
+      case .ignored: break
+      }
+    }
+    fortress.step()
+    // Snapshotting every tick, as a real window would, so the fixture covers
+    // the windowed path rather than a quieter one.
+    _ = fortress.snapshot(camera: controller.camera)
+    if interval > 0, (tick + 1) % interval == 0 {
+      checkpoints.append(
+        Replay.Checkpoint(tick: UInt64(tick + 1), hash: fortress.stateHash))
+    }
+  }
+
+  let session = Replay(
+    seed: seed,
+    mapSize: scenario.mapSize,
+    tickCount: UInt64(ticks),
+    hashInterval: UInt32(interval),
+    commands: fortress.commands.recording,
+    checkpoints: checkpoints
+  )
+  do {
+    try session.write(to: output)
+  } catch {
+    fail("could not write \(output): \(error)")
+  }
+  print(
+    "recorded UI session: \(ticks) ticks, \(session.commands.count) commands, "
+      + "\(checkpoints.count) checkpoints -> \(output)")
+  print("final hash \(String(fortress.stateHash, radix: 16))")
 
 // MARK: - shot
 

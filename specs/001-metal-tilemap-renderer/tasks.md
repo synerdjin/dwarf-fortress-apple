@@ -52,6 +52,38 @@ Ordered by dependency. Each task names how it is verified, per Constitution V.
 - **T016** Snapshot cost bench (PC-002).
 - **T017** Wire into `Scripts/ci.sh`.
 
+## Phase 4–5 status (2026-07-27)
+
+T011–T017 implemented. Two things are **not** as the plan describes, both
+recorded rather than quietly absorbed:
+
+1. **The plan's snapshot Cost Control paragraph describes an optimization that
+   does not exist.** It states the snapshot "rebuilds only blocks whose dirty
+   flag is set, intersected with the visible region" and that "a paused
+   fortress with a still camera rebuilds nothing". `buildSnapshot`
+   (`Tileset.swift:126`) rebuilds every visible tile on every call, with no
+   dirty-flag consultation anywhere.
+
+2. **PC-002 therefore holds at one viewport and fails at another.** Measured on
+   an Apple M4, 4 layers, `--with-snapshot` against the same run without:
+
+   | viewport | total ms/tick | baseline | snapshot delta | PC-002 (< 1 ms) |
+   |---|---|---|---|---|
+   | 144×144 (200-dwarves, camera clamped to map) | 1.014 | 0.095 | 0.92 | passes |
+   | 300×200 (render-300x200, PC-001's own scale) | 2.779 | 0.301 | 2.48 | **fails, 2.5×** |
+
+   So a window at the size PC-001 names costs 2.5× what PC-002 permits. The two
+   requirements are not jointly satisfiable with a full rebuild per tick.
+
+**Not fixed here, deliberately.** The dirty-flag reuse cannot be built on the
+existing `Block.dirty`: review §4.3 establishes that flag is renderer-owned and
+cannot be reused for this, so a correct fix needs the sim-owned dirty bits of
+P1 backlog item 9 — which is scheduled before the M3 spec freeze and is not M1
+phase 5 work. Both budgets are gated in `Scripts/ci.sh` as 3× tripwires on
+today's measurements so the position cannot silently worsen while item 9 is
+scheduled. **Owner decision needed** on whether PC-002 is amended, or item 9 is
+pulled forward, or M1 closes with the gap recorded.
+
 ## Deviations from plan.md
 
 - **FR-012 is satisfied by PNG metadata, not rendered text.** The plan assumed

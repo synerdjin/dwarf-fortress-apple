@@ -38,7 +38,7 @@ let package = Package(
         .target(name: "DFUI", dependencies: ["DFCore", "DFSim", "DFRender"], swiftSettings: .df),
         .executableTarget(
             name: "dfsimCLI",
-            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender"],
+            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],
             // Not "Sources/dfsim": the filesystem is case-insensitive, so that
             // path collides with the DFSim library target.
             path: "Sources/DFSimCLI",

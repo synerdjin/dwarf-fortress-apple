@@ -17,6 +17,20 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
+## Pending owner decisions
+
+- **PC-001 and PC-002 are not jointly satisfiable as written.** At 300×200 with
+  4 layers — PC-001's own viewport — snapshot publication costs ~2.48 ms/tick
+  against PC-002's 1 ms budget. At 144×144 it costs 0.92 ms and passes. Cause:
+  `buildSnapshot` (`Tileset.swift:126`) rebuilds every visible tile every tick;
+  the per-block dirty-flag reuse the plan's Cost Control paragraph describes was
+  never implemented, and cannot be built on `Block.dirty`, which review §4.3
+  establishes is renderer-owned. A correct fix needs the sim-owned dirty bits of
+  **P1 backlog item 9**. Both budgets are gated in `Scripts/ci.sh` as 3×
+  tripwires on today's numbers so it cannot silently worsen. Choose: amend
+  PC-002, pull item 9 forward, or close M1 with the gap recorded.
+  Detail and the measurement table: `specs/001-metal-tilemap-renderer/tasks.md`.
+
 ## Pending owner approvals
 
 - **None.** Constitution v1.1.0 approved in full and applied 2026-07-27

@@ -73,7 +73,7 @@ step "Replay fixtures"
 # fixtures -- or a rename, or running from the wrong directory -- read as
 # "replay gate passed". Every fixture the project relies on is listed here by
 # name and its absence is a failure.
-required_fixtures=(Fixtures/replays/smoke.rec)
+required_fixtures=(Fixtures/replays/smoke.rec Fixtures/replays/ui-session.rec)
 for fixture in "${required_fixtures[@]}"; do
   [ -f "$fixture" ] || fail "required fixture $fixture is missing"
 done
@@ -88,7 +88,7 @@ done
 
 step "Determinism across partition counts"
 # Results must be independent of how work was decomposed, not merely race-free.
-for scenario in small-dig 200-dwarves; do
+for scenario in small-dig 200-dwarves render-300x200; do
   echo "--- $scenario"
   swift run -c release dfsim determinism-check \
     --scenario "$scenario" --ticks 3000 --threads 1,2,3,7,16,64 \
@@ -145,5 +145,31 @@ step "Performance budgets"
 swift run -c release dfsim bench --scenario 200-dwarves --ticks 5000 \
   --budget-ms 0.55 \
   || fail "bench exceeded its budget"
+
+# PC-002: a window must not add more than 1 ms/tick to simulation cost.
+#
+# Measured 2026-07-27 on an Apple M4, 200 dwarves, camera clamped to the
+# 144x144 map, 4 layers: 1.014 ms/tick with snapshot publication against
+# 0.095 without, so the snapshot itself costs ~0.92 ms/tick. That is inside
+# PC-002, but only just, and it does NOT hold at PC-001's own viewport --
+# see the render-300x200 gate below. The threshold here is 3x the measured
+# total, matching the tripwire convention above: it catches an algorithmic
+# regression without reddening on hardware variance.
+swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
+  --with-snapshot --budget-ms 3.1 \
+  || fail "snapshot-publication bench exceeded its budget (PC-002)"
+
+# PC-001 scale. Recorded as a measurement, not yet as a passing budget:
+# at 300x200 with 4 layers the snapshot costs ~2.48 ms/tick (2.779 total
+# against a 0.301 baseline), which is 2.5x what PC-002 allows. The cause is
+# known and is not a regression -- `buildSnapshot` rebuilds every visible
+# tile every tick, because the per-block dirty-flag reuse the plan's Cost
+# Control section describes was never implemented, and implementing it needs
+# the sim-owned dirty bits of P1 backlog item 9. Tracked in docs/state.md.
+# The budget below is a 3x tripwire on today's number so the situation cannot
+# quietly get worse while the real fix is scheduled.
+swift run -c release dfsim bench --scenario render-300x200 --ticks 2000 \
+  --with-snapshot --budget-ms 8.4 \
+  || fail "render-300x200 snapshot bench exceeded its budget (PC-001 scale)"
 
 printf '\n\033[32mAll gates passed.\033[0m\n'
