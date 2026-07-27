@@ -168,7 +168,7 @@ public final class TilemapRenderer {
     commandBuffer: MTLCommandBuffer
   ) throws {
     guard !snapshot.isEmpty else { return }
-    try uploadInstances(snapshot.instances)
+    uploadInstances(snapshot.instances)
 
     let pass = MTLRenderPassDescriptor()
     pass.colorAttachments[0].texture = target
@@ -261,7 +261,26 @@ public final class TilemapRenderer {
     )
   }
 
-  private func uploadInstances(_ instances: [TileInstance]) throws {
+  /// Copies the instance array into the shared buffer the GPU reads.
+  ///
+  /// **This function is deliberately non-throwing. Do not add `throws`.** See
+  /// KI-001 in `docs/known-issues.md`: Swift 6.3.3 miscompiles this function in
+  /// release builds, leaving `MTLBuffer.contents()` in `x21` — the arm64
+  /// `swifterror` register — on a path that never throws. The caller in
+  /// `dfsim shot` then reads a non-null `x21` as "a throw happened", hands the
+  /// Metal-mapped pointer to `swift_getErrorValue`, and traps in
+  /// `_swift_getClass` on a page that is not a Swift error box.
+  ///
+  /// Removing `throws` removes the error-return convention from the frame the
+  /// optimizer is corrupting, and is the only change measured to survive the
+  /// worst known arrangement (15/15 release captures trapped with `throws`,
+  /// 0/15 without it, everything else held identical). The hoisted
+  /// `destination` below is the second, independent mitigation — re-deriving
+  /// the pointer inside the closure also reproduced the trap.
+  ///
+  /// A buffer allocation failure is unrecoverable and has no caller that could
+  /// act on it, so it is a precondition rather than a thrown error.
+  private func uploadInstances(_ instances: [TileInstance]) {
     let byteCount = instances.count * MemoryLayout<TileInstance>.stride
     guard byteCount > 0 else { return }
 
@@ -271,24 +290,15 @@ public final class TilemapRenderer {
       guard
         let buffer = device.makeBuffer(length: max(byteCount, 4096), options: .storageModeShared)
       else {
-        throw RenderError.bufferCreationFailed
+        preconditionFailure("MTLDevice.makeBuffer returned nil for \(byteCount) bytes")
       }
       instanceBuffer = buffer
       instanceCapacity = buffer.length
     }
 
-    // Written defensively after a release-only crash localised to this
-    // function. The previous version force-unwrapped the stored property from
-    // inside the `withUnsafeBytes` closure and let the destination pointer be
-    // re-derived there. This version takes a local strong reference and
-    // resolves the destination pointer *before* entering the closure, so the
-    // buffer's lifetime does not depend on how the optimizer treats a stored
-    // property accessed across a closure boundary.
-    //
-    // Honest status: restructuring made the crash stop reproducing, and the
-    // regression test below exercises the path hard, but the original defect
-    // was not root-caused. If it returns, suspect this function first.
-    guard let buffer = instanceBuffer else { throw RenderError.bufferCreationFailed }
+    guard let buffer = instanceBuffer else {
+      preconditionFailure("instance buffer missing after allocation")
+    }
     let destination = buffer.contents()
     instances.withUnsafeBufferPointer { source in
       guard let base = source.baseAddress else { return }

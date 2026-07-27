@@ -10,11 +10,11 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `docs/constitution-v1.1.0`, off `main` (`f4c951b`, PR #3 merged). `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
+| Branch | `investigate/ki-001` (PR #5), off `main` after PR #4 merged. `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | Constitution v1.1.0 **drafted and submitted for approval** (`docs/decisions/0003`). Before that: review remediation P0 batch (items 1–7 + scaffolding patches), merged via PR #3. |
-| Next | **Owner approval of `docs/decisions/0003`** — blocked on a human; nothing else in the plan depends on it. Unblocked meanwhile: M1 phases 4–5 (window, camera, click-to-designate), and P1 backlog item 13 (KI-001 discriminators, §5.3). |
-| Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3, now P1 backlog item 13 |
+| Last completed | **KI-001 root-caused and mitigated** (PR #5). Before that: constitution v1.1.0 drafted and submitted for approval (`docs/decisions/0003`, PR #4 merged — the draft is landed, the amendment is *not* enacted); review remediation P0 batch via PR #3. |
+| Next | **Owner approval of `docs/decisions/0003`** — blocked on a human; nothing else depends on it. Unblocked meanwhile: M1 phases 4–5 (window, camera, click-to-designate), and P1 backlog items 8–12, which gate the M3 spec freeze. |
+| Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
 
 ## Pending owner approvals
@@ -69,6 +69,16 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: **KI-001 root-caused and mitigated** (PR #5, `investigate/ki-001`).
+  Swift 6.3.3 leaves `MTLBuffer.contents()` in `x21`, the arm64 `swifterror`
+  register, on a path that never throws; the caller reads non-null `x21` as a
+  thrown error and traps in `_swift_getClass`. Confirmed by direct register
+  reads at the caller's error checks and by predicting, then measuring, that the
+  bogus error pointer's mapped region scales with the instance buffer. The
+  `rethrows` hypothesis from review §5.3 is **refuted** (arrangement C).
+  `uploadInstances` is now non-throwing — the only change that survived the
+  worst arrangement, 15/15 trapping to 0/15. Still a workaround, not a cure, and
+  not yet filed upstream. The release-capture gate was observed firing.
 - 2026-07-27: Constitution v1.1.0 drafted and submitted (`docs/decisions/0003`,
   draft text in `.specify/memory/constitution-v1.1.0-draft.md`); **nothing
   applied — the constitution remains v1.0.0 pending owner approval.** Baseline

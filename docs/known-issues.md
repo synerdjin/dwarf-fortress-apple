@@ -1,93 +1,109 @@
 # Known Issues
 
-## KI-001 — Release-only crash in the render path, not root-caused
+## KI-001 — Release-only crash in the render path: **root-caused 2026-07-27**
 
-**Status**: worked around, not understood. **Opened**: 2026-07-26.
+**Status**: root cause identified and mitigated. Upstream compiler bug, not
+misuse. **Opened**: 2026-07-26. **Root-caused**: 2026-07-27.
 
-### Symptom
+### Root cause
 
-`dfsim shot` traps (SIGTRAP, exit 133) in release builds while passing in debug.
-Crash reports point at `swift_getErrorValue` → `_swift_getClass`, i.e. the
-error-catching machinery reading a value that is not a valid error box. With one
-arrangement of `TilemapRenderer.uploadInstances` it failed on every run; with
-another it passes on every run.
+Swift 6.3.3 miscompiles `TilemapRenderer.uploadInstances` in release builds: it
+leaves the value of `MTLBuffer.contents()` in **`x21`, the arm64 `swifterror`
+register**, on a control-flow path that never throws.
 
-### What the timeboxed investigation established
+The Swift arm64 calling convention uses `x21` to carry a thrown error out of a
+`throws` function: the caller zeroes it before the call and tests it after, and
+a non-null value means "an error was thrown". Because the callee left a Metal
+buffer pointer there, the caller concludes a throw occurred, passes that pointer
+to `swift_getErrorValue`, and `_swift_getClass` traps reading a Metal-mapped
+page as if it were a Swift error box.
 
-- **Reliably reproducible** in the failing arrangement — not intermittent.
-- **AddressSanitizer reports no error, and the crash does not occur under it.**
-  Instrumentation perturbs whatever the fault is.
-- **Metal API and GPU validation are silent.** Adding `MTL_DEBUG_LAYER=1` and
-  `MTL_SHADER_VALIDATION=1` produced no diagnostics, so this is not Metal misuse.
-- **`device.makeBuffer` is not returning nil.** Replacing that throw with a
-  `fatalError` carrying a marker string produced no marker, so the visible throw
-  site never fires.
-- **`withUnsafeBytes` vs `withUnsafeBufferPointer` is irrelevant.** Changing only
-  that still crashed.
-- **Hoisting `buffer.contents()` out of the copy closure makes it pass** — 15/15
-  release captures and full `ci.sh` green.
+The crash therefore has nothing to do with object lifetime. It is a corrupted
+error-return register, which is why the symptom was `swift_getErrorValue` with
+no throw site firing, and why `withExtendedLifetime` — which changes register
+allocation — made it *worse* rather than better.
 
-### The hypothesis that was disproved
+### The evidence
 
-The obvious reading was a lifetime bug: `MTLBuffer.contents()` returns a raw
-pointer that does not keep the buffer alive, so calling it inside the closure
-would let the optimizer release the buffer before the copy ran.
+Measured on Apple M4, macOS 26.5.2, Swift 6.3.3 (swiftlang-6.3.3.1.3),
+Xcode 26.6 (17F113), release build, `dfsim shot --scenario small-dig`.
 
-That theory is **wrong**, or at least incomplete. Wrapping the same code in
-`withExtendedLifetime(buffer) { … }` — which is strictly stronger than hoisting,
-and is the documented fix for exactly that hazard — **fails on every run**. A
-lifetime fix cannot make a lifetime bug worse. Whatever this is, it is sensitive
-to code arrangement in a way a genuine `contents()` lifetime bug would not be.
+**Direct register observation.** Breaking on the caller's two error checks in
+`dfsimCLI_main`:
 
-### What this most likely means
+| checkpoint | `x21` | outcome |
+|---|---|---|
+| after `TilemapRenderer.init` — compiler emits `mov x21, #0x0` first | `0x0000000000000000` | correct, no error |
+| after `capture` — no clear emitted, callee assumed to preserve | `0x0000000104b90000` | `cbnz x21` → catch → trap |
 
-The symptom moves with optimizer decisions (inlining, layout), which is the
-signature of undefined behaviour somewhere else in the program surfacing at
-whatever code the optimizer happens to arrange badly. The render path is where
-it manifests, not necessarily where it lives.
+The caller's catch block is literally `mov x0, x21` / `bl swift_getErrorValue`,
+so the trapping value is the swifterror register verbatim. At entry to
+`swift_getErrorValue`, `x0 == x21 == 0x104c3c000`.
 
-### Eliminated: the uninitialized-memory lead (2026-07-26)
+**The bogus "error" is the instance buffer.** The pointer's mapped region scales
+exactly with the instance buffer, confirming identity:
 
-`ComponentStorage`, `ListStorage` and `MapStore` did write to memory from
-`UnsafeMutableBufferPointer.allocate` via subscript assignment rather than
-`initialize`, which is formally undefined. That has now been fixed throughout:
-first writes use `initialize`, buffer growth uses `moveInitialize` instead of
-`update`, removal deinitializes the slots that leave the live region, and
-`MapStore.materialize` distinguishes a recycled run (already initialized) from a
-freshly bumped one (not).
+| capture size | instance bytes | region at trap | pages |
+|---|---|---|---|
+| 40×24 | 34,560 | `0xC000` (49,152) | 3 |
+| 80×48 | ~138,240 | `0x24000` (147,456) | 9 |
 
-**It was not this bug.** With every one of those fixes in place, restoring the
-crashing arrangement of `uploadInstances` still fails 15 out of 15 release
-captures. The UB was real and worth fixing on its own merits, but it is not the
-cause of KI-001, and the leading hypothesis is now eliminated rather than
-merely untested.
+**Controlled experiments**, 15 release captures each, everything else held
+identical:
 
-### Remaining leads
+| # | arrangement | result |
+|---|---|---|
+| A | `throws` + `withUnsafeBytes` closure + `instanceBuffer!` re-derived inside | **15/15 trapped** |
+| B | **no `throws`**, closure and force-unwrap unchanged | **0/15** |
+| C | `throws`, `rethrows` closure boundary removed entirely | **15/15 trapped** |
+| D | `throws` + hoisted `destination` (the shipped arrangement) | 0/15 |
 
-Nothing strong remains. What is known: the fault is sensitive to code
-arrangement in `uploadInstances` specifically; it survives correct memory
-initialization everywhere else; ASan, Metal validation, and the visible throw
-sites all come up empty; and `withExtendedLifetime` — strictly safer — makes it
-worse rather than better, which no ordinary lifetime bug would do.
+C is the informative one: the `rethrows` boundary is **not** the trigger — it
+was the leading hypothesis and it is wrong. The trigger is `throws` on
+`uploadInstances` combined with a register assignment that puts `contents()`
+in `x21`. B shows that removing the error-return convention from that frame
+fixes it even under the worst arrangement.
 
-Suggested next steps for whoever picks this up, roughly in order of cost:
-1. Reduce to a standalone file outside the package that reproduces it, so the
-   surrounding code volume stops being a variable.
-2. Inspect the optimized SIL/IR for the two arrangements and diff them, rather
-   than reasoning about what the optimizer *should* do.
-3. If a minimal reproducer exists, it is worth reporting upstream — the
-   evidence is now more consistent with a compiler defect than with a misuse.
+Adding a `FileHandle.standardError.write` of the pointer made the crash vanish,
+which is why the original timeboxed investigation found instrumentation
+"perturbed" the fault and had to resort to bisection.
 
-### Guard rails added
+### Mitigation in the tree
 
-- `Scripts/ci.sh` runs the test suite in **release as well as debug**. Debug and
-  release are demonstrably different programs in this project, and this bug hid
-  for two milestones because only debug was routinely exercised.
-- `ci.sh` no longer converts a capture crash into "no GPU reachable — skipped".
-  The earlier version reported *all gates passed* while `shot` was broken.
+`uploadInstances` is **non-throwing**, and the destination pointer is resolved
+before entering the copy closure. Two independent mitigations, because each was
+separately measured to suppress the trap. The doc comment on the function says
+not to re-add `throws` and why.
 
-### Do not
+This is a workaround, not a cure. `draw` and `capture` remain `throws`, so the
+same miscompile could in principle surface elsewhere in that chain. What would
+catch it is unchanged and proven: `Scripts/ci.sh` runs a release capture, and
+this bug is exactly what that gate exists to see.
 
-Re-apply `withExtendedLifetime` around this copy assuming it is safer. It is
-correct in principle and reproduces the crash in practice; until the real cause
-is found, the arrangement that passes is the one in the repository.
+### Guard proof
+
+Per the constitution's "a guard that has never failed is unproven": the release
+capture gate was observed firing during this investigation. Restoring
+arrangement A produced 15 consecutive `Trace/BPT trap: 5`, exit 133, and
+`ci.sh` fails on it rather than reporting a skip.
+
+### Upstream
+
+Worth reporting to the Swift project: an optimized `throws` function leaving a
+live value in the `swifterror` register is a miscompile, and the reproducer is
+small (a `throws` method that calls an ObjC method returning a pointer and
+force-unwraps a stored optional property). Not yet filed — reducing to a
+standalone file outside the package is the remaining work.
+
+### Superseded hypotheses
+
+Recorded so they are not re-investigated:
+
+- **`MTLBuffer.contents()` lifetime.** Disproved: `withExtendedLifetime`, which
+  is strictly stronger, reproduced the crash on every run.
+- **Uninitialized memory in `ComponentStorage`/`ListStorage`/`MapStore`.** Real
+  UB, fixed on its own merits 2026-07-26, and *not* this bug — arrangement A
+  still failed 15/15 with every one of those fixes in place.
+- **`withUnsafeBytes` vs `withUnsafeBufferPointer`.** Irrelevant; see C.
+- **Metal misuse.** `MTL_DEBUG_LAYER=1` and `MTL_SHADER_VALIDATION=1` are silent,
+  and `makeBuffer` never returns nil (a `fatalError` in that branch never fired).
