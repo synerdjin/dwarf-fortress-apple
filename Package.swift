@@ -1,10 +1,14 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// Module layout follows docs/ARCHITECTURE.md. Dependencies point strictly
-// downward: DFCore <- DFECS <- DFSim <- executables. No module imports one
-// above it. Targets are added as their milestone begins -- DFRaws, DFWorld,
-// DFRender and DFUI arrive in M4, M7 and M1 respectively.
+// Dependencies point strictly downward: DFCore <- DFECS <- DFSim <-
+// executables. No module imports one above it. Targets are added as their
+// milestone begins -- DFRaws, DFWorld and DFUI arrive in M4, M7 and M1
+// respectively; DFRender arrived in M1.
+//
+// This comment used to cite docs/ARCHITECTURE.md, which has never existed in
+// this repository. The dependency rule above is the whole of what that
+// reference was carrying, so it is stated here rather than pointed at.
 let package = Package(
     name: "dwarf-fortress-apple",
     platforms: [.macOS(.v15)],

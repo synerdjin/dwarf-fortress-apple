@@ -46,7 +46,8 @@ to a test task below; an unmapped requirement is a generation failure.
 - [ ] T0NN Replay all fixtures: `swift run dfsim replay Fixtures/replays/*.rec --assert-hashes`;
       if this milestone legitimately changes another module's golden hashes, record
       the conversation per the constitution before re-blessing anything
-- [ ] T0NN `swift run dfsim determinism-check --threads 1,2,4`
+- [ ] T0NN `swift run dfsim determinism-check` (the default thread set is the gate;
+      narrowing it with `--threads` is a debugging aid, not a pass)
 - [ ] T0NN `swift run dfsim bench --scenario [name]` against the plan's Performance
       Budget number
 - [ ] T0NN Observe the behavior via `dfsim ascii` (or this milestone's verb) and

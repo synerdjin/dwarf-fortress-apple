@@ -45,12 +45,26 @@ jobs:
           swift --version
 
       - name: Run the merge gate
+        # CI_ALLOW_NO_GPU is set here and nowhere else. The GitHub hosted macOS
+        # runners advertise no Metal device, so without it ci.sh fails -- which
+        # is the correct default, because every machine this project targets has
+        # one, and "the GPU work stopped running" must not be indistinguishable
+        # from "the GPU work passed" on a developer's Mac.
+        #
+        # Understand what it costs: under this flag the headless capture step
+        # does not run and the render tests skip rather than fail, so a green
+        # run here proves strictly less than a green run locally. A change that
+        # touches DFRender is verified by a local Scripts/ci.sh, not by this
+        # workflow. If GitHub ever offers a GPU-backed macOS runner, delete this
+        # line rather than keeping it for convenience.
+        env:
+          CI_ALLOW_NO_GPU: "1"
         run: Scripts/ci.sh
 
       - name: Upload captured frames
         # Debug artifact only -- dfsim shot output, if the gate produced any.
-        # Headless render capture is soft-skipped by ci.sh when no Metal
-        # device is advertised, which is expected on some CI runners.
+        # Headless render capture is skipped under CI_ALLOW_NO_GPU on runners
+        # with no Metal device, so this is often empty.
         if: always()
         uses: actions/upload-artifact@v4
         with:

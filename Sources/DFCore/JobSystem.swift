@@ -20,7 +20,7 @@ import Dispatch
 /// partitions are contiguous and merged in order, the merged sequence is the
 /// same one a single-threaded pass would produce. The result therefore does not
 /// depend on the partition count *at all* -- which is exactly what
-/// `dfsim determinism-check --threads 1,2,4` asserts.
+/// `dfsim determinism-check` asserts across its full thread set.
 ///
 /// The failure mode this design rules out is the one that would otherwise end
 /// this project: a fortress that desynchronises from its own replay after an
@@ -58,7 +58,7 @@ public final class JobSystem: @unchecked Sendable {
 
   /// Overrides the partition count for every dispatch that does not name one.
   ///
-  /// This is what `dfsim determinism-check --threads 1,2,4` actually varies.
+  /// This is what `dfsim determinism-check --threads ...` actually varies.
   /// Without it the check would be vacuous: thread *count* is not something a
   /// caller controls under `concurrentPerform`, but the decomposition is, and
   /// the decomposition is what a correct system must be invariant to.

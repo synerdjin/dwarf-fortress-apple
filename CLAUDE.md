@@ -50,7 +50,7 @@ Never report work as done without running these. `Scripts/ci.sh` is the merge ga
 ```bash
 Scripts/ci.sh                                    # build + test + replays + bench gates
 swift run dfsim replay Fixtures/replays/smoke.rec --assert-hashes
-swift run dfsim determinism-check --threads 1,2,4
+swift run dfsim determinism-check              # defaults to --threads 1,2,3,7,16,64
 swift run dfsim bench --scenario 200-dwarves --ticks 10000
 swift run dfsim ascii --tick 500 --z 12          # read game state with no GUI
 ```

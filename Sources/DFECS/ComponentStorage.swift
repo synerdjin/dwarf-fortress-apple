@@ -187,11 +187,21 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
 
   /// Folds the whole storage into the tick hash.
   ///
-  /// Hashes in **entity order**, not dense order. Dense order is a legitimate
-  /// consequence of history, so two runs that reached identical fortresses by
-  /// different routes should agree -- and more importantly, sorting here means
-  /// the hash tests what the simulation *is* rather than how its arrays happen
-  /// to be laid out.
+  /// Hashes in **entity order**, not dense order, so the digest tests what the
+  /// simulation *is* rather than how its arrays happen to be laid out. Dense
+  /// order is a consequence of insertion and removal history; two storages
+  /// holding the same components for the same entities hash identically no
+  /// matter what sequence of adds and swap-removes produced their layouts.
+  ///
+  /// Scope that claim carefully: it is history-independence **with respect to
+  /// storage layout**, and nothing more. It does not lift to
+  /// `Fortress.stateHash`, because the entity allocator's free list is hashed
+  /// and is genuinely allocation-history-dependent -- LIFO reuse means the
+  /// free list determines the next `EntityID`, so it is future-affecting state
+  /// that has to be in the digest. Two fortresses that look identical but
+  /// reached that state by different routes therefore do *not* hash the same.
+  /// That is correct, not a defect: they would allocate different IDs on the
+  /// next spawn and diverge. Do not "fix" either side to agree with the other.
   public func hash(into hasher: inout StateHasher) {
     hasher.combine(count)
     var order = Array(0..<count)

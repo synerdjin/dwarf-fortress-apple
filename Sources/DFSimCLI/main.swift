@@ -209,7 +209,14 @@ case "determinism-check":
   let scenario = resolveScenario(arguments.string("scenario", default: "small-dig")!)
   let seed = arguments.uint64("seed", default: 1)
   let ticks = arguments.int("ticks", default: 2000)
-  let threadCounts = arguments.intList("threads", default: [1, 2, 4])
+  // 1,2,4 is the decomposition an agent naturally reaches for, and it is the
+  // one a bug is least likely to survive being caught by: every count is a
+  // power of two, so a partition boundary that only misbehaves when the work
+  // does not divide evenly never gets exercised. 3 and 7 make the last
+  // partition ragged; 16 and 64 exceed the core count on every machine this
+  // targets, so partitions become smaller than a work item and some end up
+  // empty. Determinism must not depend on any of that.
+  let threadCounts = arguments.intList("threads", default: [1, 2, 3, 7, 16, 64])
 
   var results: [(threads: Int, hash: UInt64)] = []
   for count in threadCounts {
@@ -334,7 +341,7 @@ default:
       replay <path>      Replay a fixture
                          --assert-hashes --threads
       determinism-check  Run a scenario at several thread counts and compare
-                         --scenario --seed --ticks --threads 1,2,4
+                         --scenario --seed --ticks --threads 1,2,3,7,16,64
       bench              Measure ms/tick
                          --scenario --seed --ticks --budget-ms
       shot               Render a frame to a PNG, headless
