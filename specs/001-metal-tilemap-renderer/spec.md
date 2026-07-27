@@ -1,6 +1,6 @@
 # Milestone Specification: M1 — Seeing the Fortress
 
-**ID**: `SPEC-M1-VIEW` | **Date**: 2026-07-26 | **Status**: Clarified — awaiting approval
+**ID**: `SPEC-M1-VIEW` | **Date**: 2026-07-26 | **Status**: Approved (retroactive, covering phases 1–3 — see `docs/decisions/0001-retroactive-approvals-2026-07-27.md`)
 
 > **Requirements only.** How this is built — Metal, instanced draws, buffer
 > strategy, shader compilation — belongs in `plan.md` and is deliberately absent
