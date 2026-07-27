@@ -46,20 +46,37 @@ signature of undefined behaviour somewhere else in the program surfacing at
 whatever code the optimizer happens to arrange badly. The render path is where
 it manifests, not necessarily where it lives.
 
-### Top lead for whoever picks this up
+### Eliminated: the uninitialized-memory lead (2026-07-26)
 
-`ComponentStorage`, `ListStorage` and `MapStore` all allocate with
-`UnsafeMutableBufferPointer.allocate(capacity:)` — which returns **uninitialized**
-memory — and then write through subscript assignment (`dense[count] = value`)
-rather than `initialize(to:)`. For trivial types this works in practice and is
-widely done, but it is formally undefined: assignment to uninitialized memory
-assumes a value is already there to overwrite. That is real UB in our own code,
-it is layout-sensitive, and it is worth fixing on its own merits regardless of
-whether it is this bug.
+`ComponentStorage`, `ListStorage` and `MapStore` did write to memory from
+`UnsafeMutableBufferPointer.allocate` via subscript assignment rather than
+`initialize`, which is formally undefined. That has now been fixed throughout:
+first writes use `initialize`, buffer growth uses `moveInitialize` instead of
+`update`, removal deinitializes the slots that leave the live region, and
+`MapStore.materialize` distinguishes a recycled run (already initialized) from a
+freshly bumped one (not).
 
-Fix shape: use `initialize(repeating:count:)` when growing, and
-`initialize(to:)` for first writes into a slot, keeping plain assignment only
-for slots known to hold a value.
+**It was not this bug.** With every one of those fixes in place, restoring the
+crashing arrangement of `uploadInstances` still fails 15 out of 15 release
+captures. The UB was real and worth fixing on its own merits, but it is not the
+cause of KI-001, and the leading hypothesis is now eliminated rather than
+merely untested.
+
+### Remaining leads
+
+Nothing strong remains. What is known: the fault is sensitive to code
+arrangement in `uploadInstances` specifically; it survives correct memory
+initialization everywhere else; ASan, Metal validation, and the visible throw
+sites all come up empty; and `withExtendedLifetime` — strictly safer — makes it
+worse rather than better, which no ordinary lifetime bug would do.
+
+Suggested next steps for whoever picks this up, roughly in order of cost:
+1. Reduce to a standalone file outside the package that reproduces it, so the
+   surrounding code volume stops being a variable.
+2. Inspect the optimized SIL/IR for the two arrangements and diff them, rather
+   than reasoning about what the optimizer *should* do.
+3. If a minimal reproducer exists, it is worth reporting upstream — the
+   evidence is now more consistent with a compiler defect than with a misuse.
 
 ### Guard rails added
 

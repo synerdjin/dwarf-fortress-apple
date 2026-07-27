@@ -57,6 +57,9 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
   }
 
   deinit {
+    for record in records {
+      (pool.baseAddress! + Int(record.offset)).deinitialize(count: Int(record.count))
+    }
     pool.deallocate()
   }
 
@@ -126,8 +129,21 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
       record.capacity = allocation.capacity
     }
     if needed > 0 {
-      pool.baseAddress!.advanced(by: Int(record.offset))
-        .update(from: values.baseAddress!, count: needed)
+      let destination = pool.baseAddress!.advanced(by: Int(record.offset))
+      let alreadyLive = Swift.min(Int(record.count), needed)
+      // Assignment is only valid over the region already holding values; the
+      // rest of the run is uninitialized and must be initialized instead.
+      if alreadyLive > 0 {
+        destination.update(from: values.baseAddress!, count: alreadyLive)
+      }
+      if needed > alreadyLive {
+        (destination + alreadyLive).initialize(
+          from: values.baseAddress! + alreadyLive, count: needed - alreadyLive)
+      }
+      if Int(record.count) > needed {
+        // The list shrank; the tail leaves the initialized region.
+        (destination + needed).deinitialize(count: Int(record.count) - needed)
+      }
     }
     record.count = Int32(needed)
     records[index] = record
@@ -146,8 +162,10 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
       let newCapacity = Swift.max(4, Int(record.capacity) * 2)
       let allocation = allocate(newCapacity)
       if record.count > 0 {
+        // Freshly allocated destination: move rather than update, which also
+        // leaves the abandoned run uninitialized as it should be.
         pool.baseAddress!.advanced(by: Int(allocation.offset))
-          .update(
+          .moveInitialize(
             from: pool.baseAddress!.advanced(by: Int(record.offset)),
             count: Int(record.count)
           )
@@ -157,7 +175,7 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
       record.capacity = allocation.capacity
     }
 
-    pool[Int(record.offset) + Int(record.count)] = value
+    (pool.baseAddress! + Int(record.offset) + Int(record.count)).initialize(to: value)
     record.count += 1
     records[index] = record
   }
@@ -179,6 +197,7 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
       base.advanced(by: elementIndex)
         .update(from: base.advanced(by: elementIndex + 1), count: tail)
     }
+    (base + Int(record.count) - 1).deinitialize(count: 1)
     record.count -= 1
     records[index] = record
     return true
@@ -188,7 +207,9 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
   @discardableResult
   public func removeList(_ entity: EntityID) -> Bool {
     guard let index = recordIndex(of: entity) else { return false }
-    garbage += Int(records[index].capacity)
+    let dropped = records[index]
+    (pool.baseAddress! + Int(dropped.offset)).deinitialize(count: Int(dropped.count))
+    garbage += Int(dropped.capacity)
 
     let last = records.count - 1
     if index != last {
@@ -225,7 +246,7 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
       let count = Int(record.count)
       if count > 0 {
         newPool.baseAddress!.advanced(by: cursor)
-          .update(from: pool.baseAddress!.advanced(by: Int(record.offset)), count: count)
+          .moveInitialize(from: pool.baseAddress!.advanced(by: Int(record.offset)), count: count)
       }
       record.offset = Int32(cursor)
       record.capacity = Int32(count)
@@ -311,7 +332,10 @@ public final class ListStorage<T: PlainData>: @unchecked Sendable {
   private func growPool(to newCapacity: Int) {
     let newPool = UnsafeMutableBufferPointer<T>.allocate(capacity: newCapacity)
     if poolUsed > 0 {
-      newPool.baseAddress!.update(from: pool.baseAddress!, count: poolUsed)
+      // Bitwise move of the whole live region, including the gaps between runs.
+      // Safe for trivial elements and keeps offsets valid; a non-trivial
+      // element type would need a per-run move instead.
+      newPool.baseAddress!.moveInitialize(from: pool.baseAddress!, count: poolUsed)
     }
     pool.deallocate()
     pool = newPool
