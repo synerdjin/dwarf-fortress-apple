@@ -1,0 +1,60 @@
+name: CI
+
+# The merge gate. This workflow does not reimplement the gate -- it runs
+# Scripts/ci.sh, the same script an agent runs locally, so CI and local
+# verification can never silently diverge.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Scripts/ci.sh
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        # Picks the newest Xcode already on the runner rather than pinning a
+        # version: this project only needs Swift 6 tools-version support, and
+        # hardcoding a version here is one more thing to go stale as runner
+        # images change. Requires DEVELOPER_DIR/xcode-select, not the offline
+        # Metal compiler -- runtime shader compilation is the project's
+        # primary path (see DFRender/TilemapRenderer.swift) specifically so a
+        # Command Line Tools-only or minimally-provisioned machine still works.
+        run: |
+          echo "Available Xcode installs:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || true
+          LATEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$LATEST" ]; then
+            echo "::error::no Xcode installation found on this runner"
+            exit 1
+          fi
+          echo "Using: $LATEST"
+          sudo xcode-select -s "$LATEST/Contents/Developer"
+          xcodebuild -version
+          swift --version
+
+      - name: Run the merge gate
+        run: Scripts/ci.sh
+
+      - name: Upload captured frames
+        # Debug artifact only -- dfsim shot output, if the gate produced any.
+        # Headless render capture is soft-skipped by ci.sh when no Metal
+        # device is advertised, which is expected on some CI runners.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-out
+          path: out/
+          if-no-files-found: ignore
+          retention-days: 7

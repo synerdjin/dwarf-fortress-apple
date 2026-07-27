@@ -52,6 +52,11 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
   }
 
   deinit {
+    // Deinitialize before deallocating. A no-op for the trivial types this
+    // storage holds, but writing it correctly keeps the buffer's initialized
+    // region honest -- see docs/known-issues.md KI-001.
+    dense.baseAddress!.deinitialize(count: count)
+    owners.baseAddress!.deinitialize(count: count)
     dense.deallocate()
     owners.deallocate()
   }
@@ -73,8 +78,11 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
     }
 
     if count == capacity { grow() }
-    dense[count] = value
-    owners[count] = entity
+    // `initialize`, not assignment: slot `count` is past the initialized
+    // region, and assigning into uninitialized memory is undefined -- it
+    // presumes an existing value to overwrite.
+    (dense.baseAddress! + count).initialize(to: value)
+    (owners.baseAddress! + count).initialize(to: entity)
     sparse[slot] = Int32(count)
     count += 1
   }
@@ -93,10 +101,14 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
     let last = count - 1
     let removed = Int(denseIndex)
     if removed != last {
+      // Both slots are initialized here, so assignment is correct.
       dense[removed] = dense[last]
       owners[removed] = owners[last]
       sparse[Int(owners[removed].index)] = Int32(removed)
     }
+    // The tail slot leaves the initialized region.
+    (dense.baseAddress! + last).deinitialize(count: 1)
+    (owners.baseAddress! + last).deinitialize(count: 1)
     sparse[slot] = ComponentStorage.absent
     count = last
     return true
@@ -106,6 +118,8 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
     for index in 0..<count {
       sparse[Int(owners[index].index)] = ComponentStorage.absent
     }
+    dense.baseAddress!.deinitialize(count: count)
+    owners.baseAddress!.deinitialize(count: count)
     count = 0
   }
 
@@ -194,8 +208,12 @@ public final class ComponentStorage<T: Component>: @unchecked Sendable {
     let newCapacity = capacity * 2
     let newDense = UnsafeMutableBufferPointer<T>.allocate(capacity: newCapacity)
     let newOwners = UnsafeMutableBufferPointer<EntityID>.allocate(capacity: newCapacity)
-    newDense.baseAddress!.update(from: dense.baseAddress!, count: count)
-    newOwners.baseAddress!.update(from: owners.baseAddress!, count: count)
+    // `moveInitialize`, not `update`: the destination is freshly allocated and
+    // therefore uninitialized, and `update` requires an initialized
+    // destination. This also leaves the source uninitialized, which is exactly
+    // right before deallocating it.
+    newDense.baseAddress!.moveInitialize(from: dense.baseAddress!, count: count)
+    newOwners.baseAddress!.moveInitialize(from: owners.baseAddress!, count: count)
     dense.deallocate()
     owners.deallocate()
     dense = newDense

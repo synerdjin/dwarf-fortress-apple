@@ -1,5 +1,6 @@
 import DFCore
 import DFECS
+import DFRender
 import DFSim
 import Darwin
 import Foundation
@@ -268,6 +269,49 @@ case "bench":
     exit(1)
   }
 
+// MARK: - shot
+
+case "shot":
+  // Constitution V: how an agent looks at the *renderer*. Shares the real
+  // drawing path, so what this captures is what a player sees.
+  let scenario = resolveScenario(arguments.string("scenario", default: "small-dig")!)
+  let seed = arguments.uint64("seed", default: 1)
+  let ticks = arguments.int("tick", default: 0)
+  let tilesetName = arguments.string("tileset", default: "ascii")!
+  let pixelsPerTile = arguments.int("scale", default: 8)
+  let output = arguments.string("out", default: "frame.png")!
+
+  guard let tileset = Tileset.named(tilesetName) else {
+    fail("unknown tileset '\(tilesetName)'. Available: \(Tileset.all.map(\.name).joined(separator: ", "))")
+  }
+
+  let fortress = Fortress.make(scenario: scenario, seed: seed, jobs: JobSystem(), isRecording: false)
+  fortress.run(ticks: ticks)
+
+  let z = Int32(arguments.int("z", default: Int(scenario.mapSize.z) - 2))
+  let camera = Camera(
+    origin: Coord3(Int32(arguments.int("x", default: 0)), Int32(arguments.int("y", default: 0)), z),
+    size: Coord3(
+      Int32(arguments.int("width", default: Int(scenario.mapSize.x))),
+      Int32(arguments.int("height", default: Int(scenario.mapSize.y))),
+      1
+    ),
+    depthLayers: arguments.int("layers", default: 2)
+  )
+  let snapshot = fortress.snapshot(camera: camera, tileset: tileset)
+
+  do {
+    let renderer = try TilemapRenderer()
+    let image = try renderer.capture(snapshot, pixelsPerTile: pixelsPerTile)
+    try image.writePNG(to: output)
+    print("wrote \(output)  \(image.width)x\(image.height)")
+    for (key, value) in image.metadata.sorted(by: { $0.key < $1.key }) {
+      print("  \(key)  \(value)")
+    }
+  } catch {
+    fail("\(error)")
+  }
+
 // MARK: - scenarios
 
 case "scenarios":
@@ -293,6 +337,9 @@ default:
                          --scenario --seed --ticks --threads 1,2,4
       bench              Measure ms/tick
                          --scenario --seed --ticks --budget-ms
+      shot               Render a frame to a PNG, headless
+                         --scenario --seed --tick --z --x --y --width --height
+                         --layers --tileset --scale --out
       scenarios          List available scenarios
 
     Determinism is the point. If two of these disagree, trust the failure.

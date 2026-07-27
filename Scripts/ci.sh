@@ -15,8 +15,14 @@ swift build || fail "debug build"
 step "Build (release)"
 swift build -c release || fail "release build"
 
-step "Unit tests"
-swift run dftest || fail "unit tests"
+step "Unit tests (debug)"
+swift run dftest || fail "unit tests (debug)"
+
+step "Unit tests (release)"
+# Debug and release are demonstrably different programs here -- see
+# docs/known-issues.md KI-001, a release-only crash that hid for two milestones
+# because only debug was routinely exercised. Both configurations are gates.
+swift run -c release dftest || fail "unit tests (release)"
 
 step "Replay fixtures"
 # Golden hashes are contracts between agents. If your change moves them, that is
@@ -41,6 +47,29 @@ for scenario in small-dig 200-dwarves; do
     --scenario "$scenario" --ticks 3000 --threads 1,2,4 \
     || fail "determinism-check $scenario"
 done
+
+step "Headless render capture"
+# SC-002/SC-003: the GPU path must agree with the ASCII path and be
+# reproducible. Skipped rather than failed where no GPU is reachable.
+mkdir -p out
+# A crash must not be reported as "no GPU". Probe for a device first, then
+# treat any capture failure as a real failure -- an earlier version of this
+# script swallowed a release-only SIGTRAP as "no GPU reachable" and reported
+# all gates passed while `shot` was broken.
+if swift run -c release dfsim scenarios > /dev/null 2>&1 \
+   && system_profiler SPDisplaysDataType 2>/dev/null | grep -q Metal; then
+  swift run -c release dfsim shot --scenario small-dig --tick 4000 \
+    --width 40 --height 24 --out out/ci-frame.png > /dev/null \
+    || fail "dfsim shot failed (exit $?)"
+  echo "captured out/ci-frame.png"
+  swift run -c release dfsim shot --scenario small-dig --tick 4000 \
+    --width 40 --height 24 --out out/ci-frame-2.png | grep pixelHash
+  cmp -s out/ci-frame.png out/ci-frame-2.png \
+    || fail "two captures of the same state differ (DR-003)"
+  echo "two captures byte-identical"
+else
+  echo "no Metal device advertised -- capture skipped"
+fi
 
 step "Performance budgets"
 # M0 has no enforced budget; the number is recorded so a regression is visible

@@ -12,6 +12,7 @@ let package = Package(
         .library(name: "DFCore", targets: ["DFCore"]),
         .library(name: "DFECS", targets: ["DFECS"]),
         .library(name: "DFSim", targets: ["DFSim"]),
+        .library(name: "DFRender", targets: ["DFRender"]),
         .executable(name: "dfsim", targets: ["dfsimCLI"]),
         .executable(name: "dftest", targets: ["DFTests"]),
     ],
@@ -19,9 +20,13 @@ let package = Package(
         .target(name: "DFCore", swiftSettings: .df),
         .target(name: "DFECS", dependencies: ["DFCore"], swiftSettings: .df),
         .target(name: "DFSim", dependencies: ["DFCore", "DFECS"], swiftSettings: .df),
+        // DFRender depends on DFSim to read snapshots. Nothing below depends on
+        // it, so the simulation stays buildable and testable with no graphics
+        // stack present.
+        .target(name: "DFRender", dependencies: ["DFSim"], swiftSettings: .df),
         .executableTarget(
             name: "dfsimCLI",
-            dependencies: ["DFCore", "DFECS", "DFSim"],
+            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender"],
             // Not "Sources/dfsim": the filesystem is case-insensitive, so that
             // path collides with the DFSim library target.
             path: "Sources/DFSimCLI",
@@ -33,7 +38,7 @@ let package = Package(
         .target(name: "DFTesting", swiftSettings: .df),
         .executableTarget(
             name: "DFTests",
-            dependencies: ["DFTesting", "DFCore", "DFECS", "DFSim"],
+            dependencies: ["DFTesting", "DFCore", "DFECS", "DFSim", "DFRender"],
             swiftSettings: .df
         ),
     ]

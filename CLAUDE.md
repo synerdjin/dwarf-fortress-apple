@@ -10,8 +10,12 @@ macOS on Apple Silicon. Swift 6, data-oriented ECS, Metal tilemap renderer.
    everything else, including this file. It is deliberately not restated here:
    two copies of a rule diverge, and whichever copy an agent happens to read
    wins.
-2. **`specs/<milestone>/spec.md`** — what the milestone must do.
-3. **`specs/<milestone>/plan.md`** — how it is built.
+2. **`docs/state.md`** — where things stand right now: active milestone, branch,
+   spec status, pending approvals, ownership. Update it before you stop working.
+3. **`docs/decisions/`** — recorded human approvals. A spec is approved only if
+   a decision file says so; an unrecorded approval did not happen.
+4. **`specs/<milestone>/spec.md`** — what the milestone must do.
+5. **`specs/<milestone>/plan.md`** — how it is built.
 
 If there is no approved spec for what you are about to build, stop and write
 one. Requirements are frozen in `spec.md` before design begins in `plan.md`;
@@ -60,6 +64,14 @@ See the constitution's *Determinism Rules for Parallel Code*. The short version:
 partition before dispatch, write to disjoint slots or per-worker scratch, merge
 in partition order, and be able to explain why the result does not depend on
 worker count. Locks do not satisfy this.
+
+## Naming conventions
+
+Three naming systems coexist; keep them consistent per milestone:
+
+- Spec directory: `specs/NNN-<short-name>` (sequential, e.g. `001-metal-tilemap-renderer`)
+- Git branch: `mN-<short-name>` (milestone number, e.g. `m1-metal-tilemap-renderer`)
+- Spec ID: `SPEC-M<N>-<AREA>` (cited by tests; frozen once code references it)
 
 ## Conventions
 

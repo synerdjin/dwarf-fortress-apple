@@ -83,6 +83,7 @@ public final class MapStore: @unchecked Sendable {
   }
 
   deinit {
+    pool.baseAddress!.deinitialize(count: poolUsed)
     pool.deallocate()
   }
 
@@ -278,28 +279,39 @@ public final class MapStore: @unchecked Sendable {
 
   /// Gives a block its own tile array, filled with its former uniform value.
   private func materialize(_ block: inout Block, at index: Int) {
-    let offset = allocateBlockStorage()
-    let base = pool.baseAddress!.advanced(by: offset)
-    base.initialize(repeating: block.uniformTile, count: MapStore.tilesPerBlock)
-    block.storageOffset = Int32(offset)
+    let allocation = allocateBlockStorage()
+    let base = pool.baseAddress!.advanced(by: allocation.offset)
+    // A recycled run is still initialized (collapse leaves it so), a freshly
+    // bumped one is not. `initialize` on initialized memory and `update` on
+    // uninitialized memory are both undefined, so the distinction matters.
+    if allocation.recycled {
+      base.update(repeating: block.uniformTile, count: MapStore.tilesPerBlock)
+    } else {
+      base.initialize(repeating: block.uniformTile, count: MapStore.tilesPerBlock)
+    }
+    block.storageOffset = Int32(allocation.offset)
     blocks[index] = block
     materializedBlocks += 1
   }
 
-  private func allocateBlockStorage() -> Int {
-    if let recycled = freeOffsets.popLast() { return recycled }
+  /// Returns a run and whether it came from the free list. Recycled runs are
+  /// already initialized; freshly bumped ones are not.
+  private func allocateBlockStorage() -> (offset: Int, recycled: Bool) {
+    if let recycled = freeOffsets.popLast() { return (recycled, true) }
     let offset = poolUsed
     if offset + MapStore.tilesPerBlock > poolCapacity {
       growPool(to: Swift.max(poolCapacity * 2, offset + MapStore.tilesPerBlock))
     }
     poolUsed += MapStore.tilesPerBlock
-    return offset
+    return (offset, false)
   }
 
   private func growPool(to newCapacity: Int) {
     let newPool = UnsafeMutableBufferPointer<Tile>.allocate(capacity: newCapacity)
     if poolUsed > 0 {
-      newPool.baseAddress!.update(from: pool.baseAddress!, count: poolUsed)
+      // Destination is freshly allocated and therefore uninitialized; `update`
+      // would presume otherwise. See docs/known-issues.md KI-001.
+      newPool.baseAddress!.moveInitialize(from: pool.baseAddress!, count: poolUsed)
     }
     pool.deallocate()
     pool = newPool
