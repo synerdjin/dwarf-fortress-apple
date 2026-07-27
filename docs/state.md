@@ -10,12 +10,12 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `m1-metal-tilemap-renderer` |
+| Branch | `main` (PR #1 merged; `m1-metal-tilemap-renderer` still exists remotely, fast-forwarded to match `main`, safe to branch from or delete) |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md` |
-| Last completed | M1 phases 1–3 (snapshot boundary, tilemap renderer, headless capture) |
-| Next | Review remediation **P0 batch first** (`docs/decisions/0002`), then constitution v1.1.0, then M1 phases 4–5 |
+| Last completed | M1 phases 1–3 (snapshot boundary, tilemap renderer, headless capture), merged to `main` via PR #1 |
+| Next | Review remediation **P0 batch first** (`docs/decisions/0002`): install scaffolding patches, then backlog items 1–7 in `docs/review-2026-07-27.md` §7. Then constitution v1.1.0 approval. Then M1 phases 4–5 (window, camera, click-to-designate). |
 | Blocking issues | KI-001 (release-only crash, `docs/known-issues.md`) — fresh hypotheses in `docs/review-2026-07-27.md` §5.3 |
-| Remote | https://github.com/synerdjin/dwarf-fortress-apple, PR #1 open (`main` ← `m1-metal-tilemap-renderer`), CI green |
+| Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml`, mirrors `Scripts/ci.sh` verbatim. |
 
 ## Pending owner approvals
 
@@ -44,6 +44,11 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27: PR #1 merged into `main`. Local and remote `main` and
+  `m1-metal-tilemap-renderer` are all fast-forwarded to the same commit
+  (`72c4318`) -- no divergence, safe starting point for the next session.
+  Next agent: read this file, then start the P0 batch (task queue has it
+  broken into #11 install-patches through #16).
 - 2026-07-27: Remote created by owner; PR #1 opened; GitHub Actions CI added
   (`.github/workflows/ci.yml`, mirrors `Scripts/ci.sh` verbatim) and passed on
   first run (0.18 ms/tick on the hosted runner, capture step legitimately
