@@ -3,58 +3,41 @@
 A Dwarf Fortress–class colony simulation with full simulation depth, native to
 macOS on Apple Silicon. Swift 6, data-oriented ECS, Metal tilemap renderer.
 
-Read `docs/ARCHITECTURE.md` before your first change. Read the milestone spec in
-`docs/specs/` before implementing anything in it.
+## Read these first
 
-## The five invariants
+1. **`.specify/memory/constitution.md`** — the five invariants and the
+   determinism rules. This is the authoritative source and it supersedes
+   everything else, including this file. It is deliberately not restated here:
+   two copies of a rule diverge, and whichever copy an agent happens to read
+   wins.
+2. **`specs/<milestone>/spec.md`** — what the milestone must do.
+3. **`specs/<milestone>/plan.md`** — how it is built.
 
-These are not style preferences. Each one exists because a specific class of bug
-becomes undetectable without it, and this project is built by agents that cannot
-watch a fortress for forty hours to notice corruption. Violating one is a
-correctness bug, not a nitpick — reviewers reject on sight.
+If there is no approved spec for what you are about to build, stop and write
+one. Requirements are frozen in `spec.md` before design begins in `plan.md`;
+if designing shows a requirement is wrong, amend the spec explicitly rather
+than quietly designing to a different target.
 
-### 1. No floating point in simulation state
+## Spec-driven workflow
 
-All sim math is integer or `Fixed` (Q16.16, in `DFCore`). Floats are permitted
-only in `DFRender`, `DFUI`, and worldgen *intermediate* stages whose results are
-quantized to integers before entering sim state.
+This project uses [Spec Kit](https://github.com/github/spec-kit). Per milestone:
 
-*Why:* float results vary with instruction selection, vectorization and
-evaluation order. Once a float lands in sim state, replay stops being bit-exact
-and every regression test in the project quietly becomes a coin flip.
+| Step | Command | Produces |
+|---|---|---|
+| Principles | `/speckit-constitution` | `.specify/memory/constitution.md` (done; amend rarely) |
+| Requirements | `/speckit-specify` | `specs/<milestone>/spec.md` |
+| De-risk | `/speckit-clarify` | resolved `[NEEDS CLARIFICATION]` markers |
+| Design | `/speckit-plan` | `specs/<milestone>/plan.md` |
+| Breakdown | `/speckit-tasks` | `specs/<milestone>/tasks.md` |
+| Consistency | `/speckit-analyze` | cross-artifact report |
+| Build | `/speckit-implement` | code |
 
-### 2. All randomness flows through a named `RNGStream`
+Templates are overridden in `.specify/templates/overrides/`. The plan override
+carries the sections that actually catch bugs here — Determinism Contract,
+Performance Budget, Tick Placement and Component Access, Replay Fixtures — so
+filling the template honestly is most of the design review.
 
-Draw from a per-subsystem stream derived from the world seed:
-`RNGStream(seed: worldSeed, .combat)`. Never `Int.random`, never
-`SystemRandomNumberGenerator`, never a shared mutable global generator.
-
-*Why:* separate streams mean adding a die roll to combat cannot shift the
-sequence that worldgen or moods observe. Shared streams make every change a
-global change.
-
-### 3. Sim state is mutated only by applying `Command` values from a queue
-
-UI, input, and AI *produce* commands. The tick loop *consumes* them in
-deterministic order. No code outside a system's tick function writes sim state.
-
-*Why:* this single rule buys replay, save-scumming, undo, and future networking.
-It is also what makes `dfsim replay --assert-hashes` a real regression net rather
-than a smoke test.
-
-### 4. Component types must be `BitwiseCopyable`
-
-No `class`, `String`, `Array`, or any other reference or heap type inside
-component data. Strings intern to `SymbolID: UInt32` via `StringTable`.
-
-*Why:* ARC traffic in a loop over 100k entities is the difference between a
-playable fortress and a slideshow, and bitwise-copyable components make
-serialization a bulk copy instead of a graph walk.
-
-### 5. Every module ships unit tests and a headless `dfsim` verb
-
-If a subsystem can only be exercised by launching the app and looking at it, an
-agent cannot verify it. Add the verb in the same change as the feature.
+Research precedes specs and lands in `docs/reference/` with confidence tags.
 
 ## Verification
 
@@ -73,16 +56,10 @@ change you have watched produce the right tiles are different things.
 
 ## Determinism rules for parallel code
 
-The job system is deterministic by construction, and it stays that way only if
-you follow the pattern:
-
-- Partition work into index ranges **before** dispatch. Never let a worker claim
-  work dynamically in a way that affects results.
-- Workers write to disjoint slots, or to a per-worker command buffer that is
-  merged **in worker order** at the barrier.
-- Thread completion order must never influence state. If you cannot explain why
-  your system is order-independent, it is not.
-- Any new parallel system must pass `determinism-check --threads 1,2,4`.
+See the constitution's *Determinism Rules for Parallel Code*. The short version:
+partition before dispatch, write to disjoint slots or per-worker scratch, merge
+in partition order, and be able to explain why the result does not depend on
+worker count. Locks do not satisfy this.
 
 ## Conventions
 
@@ -97,15 +74,15 @@ you follow the pattern:
 
 ## Working agreement
 
-- **Specs precede code.** If there is no approved spec in `docs/specs/` for what
-  you are about to build, stop and write one. See `docs/specs/TEMPLATE.md`.
-- **Research precedes specs.** Mechanics research lands in `docs/reference/` with
-  confidence tags and sources. Where our behavior deliberately differs from DF,
-  or where DF's behavior is unknown, the spec says so explicitly with
-  `[DIVERGENCE: <rule> because <reason>]`. Never invent a mechanic silently —
-  a guess that goes unmarked becomes canon three milestones later.
-- **Replay fixtures are contracts between agents.** If your change alters another
-  module's golden hashes, that is a conversation with the owning agent, not a
-  fixup commit that re-blesses the hashes.
-- **Perf budgets are numbers.** Each spec states ms/tick at a stated scale, and
-  `bench` fails the build when you exceed it.
+The constitution governs; this is the day-to-day shape of it.
+
+- **Specs precede code.** No approved spec, no implementation. See *Read these
+  first*.
+- **Replay fixtures are contracts between agents.** If your change alters
+  another module's golden hashes, that is a conversation with the owning agent,
+  not a fixup commit that re-blesses the hashes.
+- **A guard that has never failed is unproven.** When you add a check whose
+  whole value is catching a rare condition, break it deliberately once, confirm
+  it fires, and say so in the commit message.
+- **Report honestly.** If tests fail, say so with the output. If a step was
+  skipped, say that. "Should work" is not a result.
