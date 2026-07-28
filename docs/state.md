@@ -10,10 +10,10 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `m1-dirty-flag-snapshot`, off `m1-window-and-input` (merged to `main` as PR #8). Awaiting PR/review. `m1-metal-tilemap-renderer` (the branch named in this repo's PR-target convention) is stale, still at the pre-PR#8 commit — PRs #6 onward have actually targeted `main`; worth a decision on which name is authoritative before the next branch. |
+| Branch | `m1-parallel-stencil-primitive` (in progress, off `main` at `9c47e73`, PR #9 merged). `m1-metal-tilemap-renderer` (the branch named in this repo's PR-target convention) is stale, still pre-PR#8 — PRs #6 onward have actually targeted `main`; worth a decision on which name is authoritative before the next branch. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | **PC-001/PC-002 conflict resolved** (P1 backlog item 9, dirty-bit/snapshot-gating slice — see Session log). Before that: M1 phases 4–5 (T011–T017); constitution v1.1.0 in force; KI-001 root-caused. |
-| Next | **P1 backlog items 8, 10–12** (item 9 done, this slice of it), which gate the M3 spec freeze and which v1.1.0 makes mandatory rather than advisory. Item 9's other half — temperature split out of `Tile`, per-block cached hash digests — remains scheduled, deliberately deferred (see Session log). |
+| Last completed | **PC-001/PC-002 conflict resolved** (P1 backlog item 9, dirty-bit/snapshot-gating slice — PR #9, merged). Before that: M1 phases 4–5 (T011–T017); constitution v1.1.0 in force; KI-001 root-caused. |
+| Next | **P1 backlog item 8 done this session** (`parallelStencil`, `DoubleBuffered`, `ActiveSet` primitives + negative determinism tests — see Session log); **items 10–12 remain**, gating the M3 spec freeze that v1.1.0 makes mandatory rather than advisory. Item 9's other half — temperature split out of `Tile`, per-block cached hash digests — remains scheduled, deliberately deferred. |
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. **No hosted-runner reading yet for the snapshot-cache fix** — this branch's own CI run will be the first; `Scripts/ci.sh`'s two new gates are interim 3×-local tripwires (0.5 / 0.8 ms/tick) pending it. |
 
@@ -26,9 +26,10 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 ## Open work queues
 
 - Remediation backlog: `docs/review-2026-07-27.md` §7. **P0 (1–7) done. Item 9
-  done (dirty-bit/snapshot-gating slice only — see Session log).** Items 8,
-  10–12 remain and gate the M3 spec freeze. Item 9's temperature-split and
-  hash-digest-caching half is also still open, deferred deliberately.
+  done (dirty-bit/snapshot-gating slice only). Item 8 done** (`parallelStencil`,
+  `DoubleBuffered`, `ActiveSet` — see Session log). **Items 10–12 remain** and
+  gate the M3 spec freeze. Item 9's temperature-split and hash-digest-caching
+  half is also still open, deferred deliberately.
 - **PC-001 has never actually been measured** (found 2026-07-27 while
   reviewing the hosted-vs-local CI split): `--with-snapshot` times CPU-side
   snapshot publication (PC-002's subject), not the Metal draw pass PC-001 is
@@ -70,6 +71,30 @@ before re-blessing. When parallel agents exist, split this table.
   Sole owner of the fixture per the table above; recorded here before re-blessing.
 
 ## Session log (newest first, keep last ~5)
+
+- 2026-07-28: **P1 backlog item 8 done** — `parallelStencil(read:write:)` on
+  `JobSystem`, a generic `DoubleBuffered<Element>` (the double-buffered
+  tile-field primitive), and `ActiveSet` (sorted, deduplicated, deterministic —
+  built for free by `parallelCollect`'s contiguous partition-ordered merge, no
+  separate sort step). No M3 spec exists yet (confirmed: only
+  `specs/000-m0-foundations` and `specs/001-metal-tilemap-renderer` exist), so
+  this is pre-spec primitive work only — no thermal/fluid system, no `MapStore`
+  integration (that's item 9's still-deferred temperature-split half).
+  `parallelStencil` reuses `parallelFor` directly: disjoint writes into `write`,
+  `read` typed as `UnsafeBufferPointer` so there is no mutating accessor to
+  observe a write through, which is what makes sharing it across every worker
+  safe without a lock.
+
+  Added the negative determinism tests backlog item 8 explicitly calls for —
+  none existed anywhere before this (every prior `JobSystemTests` case asserted
+  convergence, never divergence): an in-place stencil, an RNG sub-stream seeded
+  by partition instead of element, and colliding writes into shared scratch all
+  demonstrably diverge, shown via explicit processing order rather than real
+  thread scheduling so the divergence itself is reproducible, not a race whose
+  outcome depends on hardware timing. `parallelStencil`'s own positive test
+  (identical output at every partition count) was broken once — made it read
+  from `write` instead of `read` — and confirmed to fail before being restored.
+  `Scripts/ci.sh` green throughout (167 tests, up from 159).
 
 - 2026-07-27 (later session): **PC-001/PC-002 conflict resolved** — owner chose
   "pull item 9 forward," scoped to just the dirty-bit/snapshot-gating slice
@@ -142,17 +167,7 @@ before re-blessing. When parallel agents exist, split this table.
   `uploadInstances` is now non-throwing — the only change that survived the
   worst arrangement, 15/15 trapping to 0/15. Still a workaround, not a cure, and
   not yet filed upstream. The release-capture gate was observed firing.
-- 2026-07-27: Constitution v1.1.0 drafted and submitted (`docs/decisions/0003`,
-  draft text in `.specify/memory/constitution-v1.1.0-draft.md`); **nothing
-  applied — the constitution remains v1.0.0 pending owner approval.** Baseline
-  `Scripts/ci.sh` green on `main` before and after: 136 tests, 0 failures,
-  0 skips, 0.095 ms/tick (0.9% of the 10 ms budget). Also reviewed a proposal to
-  push simulation onto the GPU and Neural Engine; rejected for sim state and
-  folded into the amendment as clause 7 rather than the roadmap — reasoning in
-  0003 Group C. Only non-draft code/doc change: a 128-byte cache-line note in
-  `CLAUDE.md` conventions. Next agent: if 0003 is still unapproved, do not wait
-  on it — M1 phases 4–5 and KI-001 item 13 are independent.
 
-  *(Older entries — P0 remediation batch, PR #1 merge, remote setup, initial
-  review — trimmed per this section's own ~5-entry convention. See git log
-  and `docs/decisions/` for that history.)*
+  *(Older entries — constitution v1.1.0 draft submission, P0 remediation batch,
+  PR #1 merge, remote setup, initial review — trimmed per this section's own
+  ~5-entry convention. See git log and `docs/decisions/` for that history.)*

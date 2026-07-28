@@ -129,6 +129,48 @@ public final class JobSystem: @unchecked Sendable {
     }
   }
 
+  // MARK: - Double-buffered stencil
+
+  /// Runs a stencil computation: `body` reads freely from `read` (a
+  /// previous-tick buffer) and returns the value written to its own disjoint
+  /// slot in `write` (a different, next-tick buffer).
+  ///
+  /// This is the constitution's "stencil systems double-buffer" rule made
+  /// concrete. An in-place stencil -- reading and writing the same buffer --
+  /// is a review rejection: whether a neighbour's read sees the old or the
+  /// new value then depends on whether that neighbour was visited before or
+  /// after the tile reading it, which is exactly the partition boundary, so
+  /// the result changes with partition count. Reading a buffer nothing in
+  /// this call ever writes removes the hazard structurally rather than by
+  /// discipline: `body` cannot observe a write, because there are none to
+  /// observe until the whole call returns.
+  ///
+  /// `read` and `write` **must be different backing storage** for this
+  /// guarantee to hold. Nothing here can check that at compile time -- the
+  /// same trust boundary `parallelFor`'s disjoint-write contract already asks
+  /// of callers, extended to say the read buffer is never the write buffer.
+  /// Out-of-range neighbour lookups (map edges) are `body`'s concern, the
+  /// same as any other bounds-checked read.
+  public func parallelStencil<Element>(
+    _ range: Range<Int>,
+    workload: Workload = .simulation,
+    partitionCount: Int? = nil,
+    read: UnsafeBufferPointer<Element>,
+    write: UnsafeMutableBufferPointer<Element>,
+    _ body: @Sendable (Int, UnsafeBufferPointer<Element>) -> Element
+  ) {
+    // Same hand-asserted reasoning as `parallelReduce`'s scratch buffer: each
+    // iteration `i` writes only `write[i]`, so the concurrent writes are
+    // disjoint, and `read` is never written by this call at all.
+    nonisolated(unsafe) let read = read
+    nonisolated(unsafe) let write = write
+    parallelFor(range, workload: workload, partitionCount: partitionCount) { piece, _ in
+      for index in piece {
+        write[index] = body(index, read)
+      }
+    }
+  }
+
   // MARK: - Accumulate-and-merge parallel for
 
   /// Runs `body` once per partition with private scratch storage, then merges
