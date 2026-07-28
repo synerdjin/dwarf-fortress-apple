@@ -31,17 +31,20 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
   with the gap recorded. Detail and the measurement table:
   `specs/001-metal-tilemap-renderer/tasks.md`.
 
-  **CI gate ≠ this compliance status.** `Scripts/ci.sh`'s 144×144 gate does not
-  use PC-002's literal 1.0 ms/tick threshold — GitHub's hosted macOS runner
-  measured **1.2555 ms/tick** on this same workload (2026-07-28, PR #8 first
-  run), ~1.45× the devbox number, for CPU-only work that needs no GPU. Same
-  cause as the plain bench gate above it in that file (hosted-runner CPU is
-  slower and noisier than the dev machine) and the same fix: the gate is 3× the
-  slower of the two measured numbers (3.8), so hosted-runner variance cannot
-  redden the build while a real regression still does. The 300×200 gate (5.0)
-  is padded rather than measured — the hosted run never reached it, since the
-  script exits on first failure — and should be tightened to 3× a real hosted
-  number once one lands in a CI log.
+  **CI gate ≠ this compliance status.** `Scripts/ci.sh`'s gates do not use
+  PC-002's literal 1.0 ms/tick threshold — GitHub's hosted macOS runner is both
+  slower and considerably noisier than the devbox for this CPU-only work (no
+  GPU involved). Two consecutive PR #8 runs at 144×144, 2026-07-27/28:
+  **1.2555, then 1.8288 ms/tick — a 46% swing run to run** on presumably
+  similar hardware. The 300×200 gate's first real hosted reading, 4.9349
+  ms/tick, passed an interim 5.0 threshold by 1.3% — a near miss, not
+  headroom, and exactly the kind of number the 46% swing says will flip to a
+  false failure on its own. Both gates are now 3× the worst hosted reading on
+  record (144×144: 5.5; 300×200: 15.0), matching the plain bench gate's own
+  convention in the same file. Worth noting for the PC-001/PC-002 decision
+  above: 300×200's hosted delta (4.93 ms/tick) is proportionally *worse* than
+  its local one (2.29–2.36), so the compliance gap does not shrink under
+  real-world variance — it widens.
 
 ## Pending owner approvals
 

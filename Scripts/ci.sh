@@ -158,19 +158,23 @@ swift run -c release dfsim bench --scenario 200-dwarves --ticks 5000 \
 # real cost a real window pays, so it must not be hidden here -- it is
 # measured separately below.
 #
-# Measured 2026-07-27:
+# Measured 2026-07-27/28:
 #   Apple M4 (dev machine)       0.868 ms/tick  -- inside PC-002's 1.0 budget
-#   GitHub hosted macOS runner   1.2555 ms/tick -- over it
-# Same situation as the plain bench gate above, and the same fix: the CI gate
-# is 3x the slower of the two, so hosted-runner CPU variance cannot redden
-# the build while a genuine regression still does. This does NOT mean PC-002
-# is unmet -- it is met, on the Apple Silicon hardware the constitution and
-# this project actually target; the hosted runner has no Metal device either
-# and is already documented elsewhere (docs/state.md) as proving less than a
-# local run. The literal 1.0 ms/tick PC-002 compliance evidence is the
-# devbox number above, not this gate's threshold.
+#   GitHub hosted runner, run 1  1.2555 ms/tick -- over it, failed CI
+#   GitHub hosted runner, run 2  1.8288 ms/tick -- a 46% swing from run 1
+# That swing is the reason this is 3x the *worse* hosted reading rather than
+# the first one: two consecutive runs disagreeing by 46% means a threshold
+# fit to a single sample is a coin flip away from a false failure, which
+# looks exactly like a real regression to whoever hits it next. Same
+# situation as the plain bench gate above, and the same fix -- 3x the slower
+# of local/hosted. This does NOT mean PC-002 is unmet -- it is met, on the
+# Apple Silicon hardware the constitution and this project actually target;
+# the hosted runner has no Metal device either and is already documented
+# elsewhere (docs/state.md) as proving less than a local run. The literal
+# 1.0 ms/tick PC-002 compliance evidence is the devbox number above, not
+# this gate's threshold.
 swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
-  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 3.8 \
+  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 5.5 \
   || fail "PC-002: snapshot publication regressed past its CI tolerance at 144x144"
 
 # PC-001's own viewport, where PC-002 does NOT hold. 300x200 on the larger
@@ -186,16 +190,17 @@ swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
 # PC-002's 1.0, so it stays honest about failing the requirement instead of
 # pretending a laxer requirement is the real one.
 #
-# 5.0 here is PADDED, not measured: the 144x144 gate above hit a real hosted
-# number (1.2555 vs a local 0.868, ~1.45x) the first time this ran in CI, and
-# this scenario never got measured on the hosted runner because the script
-# exits on the first failure. 2.35 (local) x 1.45 (observed ratio elsewhere)
-# is ~3.4; 5.0 leaves headroom on top of that estimate rather than risking a
-# second red run on a guess. Once a real hosted number is in the CI log for
-# this step, tighten this to 3x that number, matching the other two gates in
-# this file -- don't leave an estimate standing once a measurement exists.
+# Measured on the hosted runner 2026-07-28: 4.9349 ms/tick, against a local
+# ~2.35-2.36. That is the run this step first executed on (the prior CI
+# attempt died at the 144x144 gate above before reaching this one), and it
+# passed the 5.0 tripwire that was in place by 1.3% -- not real headroom, a
+# near miss. The same 46% run-to-run swing seen at 144x144 (see above) means
+# a threshold sized to one hosted sample is not safe to leave at a razor's
+# edge: the very next run could read higher on pure noise and fail for
+# nothing. 3x this measurement, matching the convention used everywhere else
+# in this file.
 swift run -c release dfsim bench --scenario render-300x200 --ticks 2000 \
-  --with-snapshot --snapshot-budget-ms 5.0 \
+  --with-snapshot --snapshot-budget-ms 15.0 \
   || fail "render-300x200 snapshot cost regressed past its CI tripwire"
 
 printf '\n\033[32mAll gates passed.\033[0m\n'
