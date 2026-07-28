@@ -38,6 +38,12 @@ public final class MapStore: @unchecked Sendable {
     var revision: UInt32
     /// Set when contents change; cleared by the renderer after upload.
     var dirty: Bool
+    /// Bumped on **any** tile write that changes a value — a superset of
+    /// `revision`, which only tracks passability. Sim-owned and monotonic,
+    /// unlike `dirty`: nothing ever clears it, so any number of independent
+    /// caches can each remember "the revision I last saw" with no shared clear
+    /// to race on. Never hashed — see `blockContentRevision(at:)`.
+    var contentRevision: UInt32
 
     var isUniform: Bool { storageOffset < 0 }
   }
@@ -72,7 +78,8 @@ public final class MapStore: @unchecked Sendable {
     )
     let total = Int(blockCounts.x) * Int(blockCounts.y) * Int(blockCounts.z)
     blocks = Array(
-      repeating: Block(uniformTile: fill, storageOffset: -1, revision: 0, dirty: false),
+      repeating: Block(
+        uniformTile: fill, storageOffset: -1, revision: 0, dirty: false, contentRevision: 0),
       count: total
     )
     poolCapacity = MapStore.tilesPerBlock * 8
@@ -136,6 +143,7 @@ public final class MapStore: @unchecked Sendable {
 
     pool[index] = tile
     block.dirty = true
+    block.contentRevision &+= 1
     if previous.isPassable != tile.isPassable {
       block.revision &+= 1
     }
@@ -163,6 +171,23 @@ public final class MapStore: @unchecked Sendable {
   public func blockRevision(at coord: Coord3) -> UInt32 {
     guard let location = locate(coord) else { return 0 }
     return blocks[location.block].revision
+  }
+
+  /// The sim-owned content revision for the block containing `coord`. Bumped
+  /// on any tile write that changes a value, not just passability. Callers
+  /// that cache derived data keyed on this — `SnapshotCache` is the first —
+  /// can tell "this block changed since I last looked" without any of them
+  /// clearing a shared flag, since it never resets.
+  ///
+  /// Excluded from `hash(into:)` by construction: it is derived state used to
+  /// invalidate a cache, not simulation state, so two maps with identical
+  /// tiles but different edit histories must still hash identically. Out of
+  /// bounds returns 0, matching a fresh block's initial revision, which is
+  /// safe because an out-of-bounds coordinate never round-trips into a real
+  /// cache slot for comparison against a changing value.
+  public func blockContentRevision(at coord: Coord3) -> UInt32 {
+    guard let location = locate(coord) else { return 0 }
+    return blocks[location.block].contentRevision
   }
 
   public func isDirty(at coord: Coord3) -> Bool {

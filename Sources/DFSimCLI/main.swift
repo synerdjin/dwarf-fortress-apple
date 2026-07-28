@@ -272,9 +272,8 @@ case "bench":
   /// One measured run. Returns ms/tick and the fortress it measured.
   ///
   /// Drives `SimulationHost` rather than re-implementing its loop. That is not
-  /// tidiness: per-block dirty-flag reuse will land in the host's publish path,
-  /// and a bench that hand-rolled the loop would keep certifying the code that
-  /// had been replaced.
+  /// tidiness: the host owns the `SnapshotCache` that makes PC-002 hold, and a
+  /// bench that hand-rolled the loop would measure a path nothing else uses.
   func measure(publishingSnapshots: Bool) -> (msPerTick: Double, fortress: Fortress) {
     let fortress = Fortress.make(
       scenario: scenario, seed: seed, jobs: JobSystem(), isRecording: false)
@@ -377,8 +376,8 @@ case "ui-session":
     mapSize: scenario.mapSize)
   let inputMap = InputMap()
   // Driving the real host, not a hand-rolled loop: the fixture is supposed to
-  // prove the *windowed* path replays, and the snapshot side of that path is
-  // about to change when dirty-flag reuse lands.
+  // prove the *windowed* path replays, including the snapshot cache the host
+  // owns (SnapshotCache, Tileset.swift).
   let host = SimulationHost(fortress: fortress, camera: controller.camera)
 
   // A fixed gesture script. Camera moves are interleaved with clicks on

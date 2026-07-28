@@ -238,6 +238,46 @@ public func registerUITests() {
       host.stop()
       expect(!host.stepOnce(), "after stop() the loop must report that it is done")
     }
+
+    test("the host's cached snapshot matches an uncached rebuild through digging and a pan") {
+      // The direct correctness check for `SnapshotCache` (docs/state.md,
+      // P1 backlog item 9): if a cached slot ever goes stale, this is where it
+      // would show up, since every checkpoint compares against a fresh
+      // independent fortress that never caches anything.
+      //
+      // Checkpoints span the tile designated at tick 1 (SPEC-M0-SIM: "Dwarves
+      // actually dig"), digging in progress, and digging complete -- so both
+      // kinds of change `contentRevision` must catch (a cosmetic designation
+      // and a structural dig) are exercised, not just one. The camera changes
+      // partway through to exercise cache invalidation on a pan.
+      let checkpoints = [1, 5, 20, 100, 500, 3000]
+      let stillCamera = Camera(origin: Coord3(0, 0, 6), size: Coord3(24, 16, 1), depthLayers: 1)
+      let pannedCamera = Camera(origin: Coord3(6, 4, 6), size: Coord3(24, 16, 1), depthLayers: 1)
+      let panAfter = checkpoints.count / 2
+
+      let host = makeHost(camera: stillCamera)
+      var ticksSoFar = 0
+
+      for (index, checkpoint) in checkpoints.enumerated() {
+        if index == panAfter { host.setCamera(pannedCamera) }
+        while ticksSoFar < checkpoint {
+          host.stepOnce()
+          ticksSoFar += 1
+        }
+
+        guard let published = host.ring.latest() else {
+          expect(false, "the host published nothing by tick \(checkpoint)")
+          return
+        }
+        let reference = Fortress.make(
+          scenario: .smallDig, seed: 1, jobs: JobSystem(), isRecording: false)
+        reference.run(ticks: checkpoint)
+        let referenceCamera = index < panAfter ? stillCamera : pannedCamera
+        expectEqual(
+          published.instances, reference.snapshot(camera: referenceCamera).instances,
+          "cached and uncached snapshots diverged at tick \(checkpoint)")
+      }
+    }
   }
 
   suite("SPEC-M1-VIEW: Input classification (DR-001)") {

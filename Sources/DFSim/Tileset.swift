@@ -116,6 +116,30 @@ public struct Tileset: Sendable {
   }
 }
 
+/// Caches a snapshot's terrain layer across ticks so an unchanged view can be
+/// copied instead of recomputed.
+///
+/// Keyed off `MapStore.blockContentRevision(at:)`, which is sim-owned and
+/// monotonic — this cache never clears anything, it only compares the revision
+/// it last saw for a slot against the current one. That is what makes it safe
+/// to be the *only* reader of that revision today: a second independent cache
+/// could exist alongside it and neither would need to coordinate.
+///
+/// Renderer-independent by construction: nothing here touches the GPU, a
+/// device, or timing, so caching cannot make simulation cost depend on whether
+/// a window is open (PC-002).
+public final class SnapshotCache {
+  fileprivate var camera: Camera?
+  fileprivate var terrain: [TileInstance] = []
+  /// One entry per slot in `terrain`. `UInt32.max` means "never computed for
+  /// this camera" — real revisions start at 0 and would need four billion
+  /// writes to one block to collide with it, the same wraparound tolerance
+  /// `Block.revision` already accepts elsewhere in this file.
+  fileprivate var blockRevisions: [UInt32] = []
+
+  public init() {}
+}
+
 extension Fortress {
   /// Builds a snapshot of the visible region.
   ///
@@ -123,6 +147,10 @@ extension Fortress {
   /// output is indexed by tile position rather than appended, partitioning this
   /// by row range would give disjoint writes and need no merge — which is why
   /// DR-001 holds by construction here rather than by care.
+  ///
+  /// Always a full rebuild — every existing caller (`dfsim shot`, tests, this
+  /// method's own `snapshot(camera:)` convenience) keeps exactly today's
+  /// behavior. The cached, cost-controlled path is the overload below.
   public func buildSnapshot(
     camera: Camera,
     tileset: Tileset,
@@ -158,9 +186,122 @@ extension Fortress {
       }
     }
 
-    // Creatures overlay the focused layer only. Where two share a tile the last
-    // in dense order wins -- a display artifact, documented, that feeds back
-    // into nothing.
+    overlayCreatures(camera: camera, tileset: tileset, into: &snapshot, layers: layers)
+
+    snapshot.camera = camera
+    snapshot.tick = tick
+    snapshot.stateHash = stateHash
+    snapshot.layerCount = layers
+  }
+
+  /// Builds a snapshot the same way, except the terrain layers are read from
+  /// `cache` and only the slots whose block changed since the cache last built
+  /// them are actually recomputed. A camera change invalidates the whole
+  /// cache — its slots would otherwise hold the previous camera's tiles at the
+  /// new camera's coordinates.
+  ///
+  /// This is `SimulationHost`'s path: the one PC-002 measures, called once per
+  /// tick with the same `SnapshotCache` every time.
+  public func buildSnapshot(
+    camera: Camera,
+    tileset: Tileset,
+    into snapshot: inout FrameSnapshot,
+    cache: SnapshotCache
+  ) {
+    let layers = max(1, camera.depthLayers + 1)
+    let perLayer = camera.tileCount
+    let needed = perLayer * layers
+
+    if cache.camera != camera || cache.terrain.count != needed {
+      cache.terrain = Array(repeating: TileInstance(), count: needed)
+      cache.blockRevisions = Array(repeating: UInt32.max, count: needed)
+      cache.camera = camera
+    }
+
+    let cameraWidth = Int(camera.size.x)
+    for layer in 0..<layers {
+      let depth = UInt8(layers - 1 - layer)
+      let z = camera.origin.z - Int32(depth)
+      let base = layer * perLayer
+      let zInBounds = z >= 0 && z < map.size.z
+
+      for row in 0..<Int(camera.size.y) {
+        let y = camera.origin.y + Int32(row)
+        let rowBase = base + row * cameraWidth
+
+        guard zInBounds, y >= 0, y < map.size.y else {
+          // The whole row is off-map at this z -- rare in practice (the real
+          // bench scenarios size their viewport to fit the map) and cheap
+          // either way, so no chunking here.
+          for column in 0..<cameraWidth {
+            let slot = rowBase + column
+            cache.terrain[slot] = TileInstance()
+            cache.blockRevisions[slot] = UInt32.max
+          }
+          continue
+        }
+
+        // Column-chunked to the block boundary in *world* x, not camera x:
+        // `MapStore.blockContentRevision` is one revision per 16-wide block,
+        // so checking it once per chunk instead of once per column is exact,
+        // not an approximation -- every column in a chunk shares the same
+        // block and therefore the same revision, by construction.
+        var column = 0
+        while column < cameraWidth {
+          let worldX = camera.origin.x + Int32(column)
+          guard worldX >= 0, worldX < map.size.x else {
+            let slot = rowBase + column
+            cache.terrain[slot] = TileInstance()
+            cache.blockRevisions[slot] = UInt32.max
+            column += 1
+            continue
+          }
+
+          let blockEndX = (worldX / Int32(MapStore.blockWidth) + 1) * Int32(MapStore.blockWidth)
+          let chunkEnd = min(
+            cameraWidth,
+            column + Int(blockEndX - worldX),
+            column + Int(map.size.x - worldX)
+          )
+
+          let revision = map.blockContentRevision(at: Coord3(worldX, y, z))
+          if cache.blockRevisions[rowBase + column] == revision {
+            column = chunkEnd
+            continue
+          }
+          for c in column..<chunkEnd {
+            let coord = Coord3(camera.origin.x + Int32(c), y, z)
+            let slot = rowBase + c
+            cache.terrain[slot] = tileset.instance(for: map[coord], depth: depth)
+            cache.blockRevisions[slot] = revision
+          }
+          column = chunkEnd
+        }
+      }
+    }
+
+    // Shares storage with `cache.terrain` (a value-type copy just retains it);
+    // the creature overlay below is what forces the actual copy-on-write, and
+    // only when there is at least one creature to draw. That is deliberate:
+    // the cache must never observe creature glyphs, or the next tick's "did
+    // this slot change" comparison would be comparing against them.
+    snapshot.instances = cache.terrain
+
+    overlayCreatures(camera: camera, tileset: tileset, into: &snapshot, layers: layers)
+
+    snapshot.camera = camera
+    snapshot.tick = tick
+    snapshot.stateHash = stateHash
+    snapshot.layerCount = layers
+  }
+
+  /// Creatures overlay the focused layer only. Where two share a tile the last
+  /// in dense order wins -- a display artifact, documented, that feeds back
+  /// into nothing.
+  private func overlayCreatures(
+    camera: Camera, tileset: Tileset, into snapshot: inout FrameSnapshot, layers: Int
+  ) {
+    let perLayer = camera.tileCount
     let focusedBase = (layers - 1) * perLayer
     world.storage(Position.self).withDense { values, _ in
       for index in 0..<values.count {
@@ -174,11 +315,6 @@ extension Fortress {
         snapshot.instances[slot] = tileset.creatureInstance(over: map[coord], depth: 0)
       }
     }
-
-    snapshot.camera = camera
-    snapshot.tick = tick
-    snapshot.stateHash = stateHash
-    snapshot.layerCount = layers
   }
 
   /// Convenience for callers that want a fresh snapshot rather than reusing one.
