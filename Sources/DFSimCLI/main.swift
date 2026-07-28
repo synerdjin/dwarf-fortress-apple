@@ -2,6 +2,7 @@ import DFCore
 import DFECS
 import DFRender
 import DFSim
+import DFUI
 import Darwin
 import Foundation
 
@@ -249,16 +250,49 @@ case "bench":
   let ticks = arguments.int("ticks", default: 10000)
   let budget = arguments.string("budget-ms").flatMap(Double.init)
 
-  let fortress = Fortress.make(
-    scenario: scenario, seed: seed, jobs: JobSystem(), isRecording: false)
-  // Warm up so the measurement is not dominated by first-touch page faults.
-  fortress.run(ticks: 100)
+  // PC-002: does publishing a snapshot every tick add more than 1 ms/tick?
+  // Measured by running the same scenario with the work switched on, because
+  // the requirement is about the delta a window imposes, not absolute cost.
+  let withSnapshot = arguments.bool("with-snapshot")
+  // Deliberately NOT clamped to the map. An earlier version clamped with an
+  // inline `min`, on a comment claiming parity with `CameraController` -- which
+  // is false: the controller clamps the camera's *origin* to the map but never
+  // its *size*. So the clamp made this gate measure a camera the shipped window
+  // never produces, and excluded exactly the empty-space cost a real window
+  // pays. Pick a viewport that fits the map (render-300x200 exists for this)
+  // rather than hiding the overhang behind a clamp.
+  let renderCamera = Camera(
+    origin: Coord3(0, 0, Int32(scenario.mapSize.z) - 2),
+    size: Coord3(
+      Int32(arguments.int("width", default: 300)),
+      Int32(arguments.int("height", default: 200)),
+      1),
+    depthLayers: arguments.int("layers", default: 4))
 
-  let start = DispatchTime.now().uptimeNanoseconds
-  fortress.run(ticks: ticks)
-  let elapsed = DispatchTime.now().uptimeNanoseconds - start
+  /// One measured run. Returns ms/tick and the fortress it measured.
+  ///
+  /// Drives `SimulationHost` rather than re-implementing its loop. That is not
+  /// tidiness: per-block dirty-flag reuse will land in the host's publish path,
+  /// and a bench that hand-rolled the loop would keep certifying the code that
+  /// had been replaced.
+  func measure(publishingSnapshots: Bool) -> (msPerTick: Double, fortress: Fortress) {
+    let fortress = Fortress.make(
+      scenario: scenario, seed: seed, jobs: JobSystem(), isRecording: false)
+    // Warm up so the measurement is not dominated by first-touch page faults.
+    fortress.run(ticks: 100)
 
-  let msPerTick = Double(elapsed) / Double(ticks) / 1_000_000
+    let host = SimulationHost(fortress: fortress, camera: renderCamera)
+    let start = DispatchTime.now().uptimeNanoseconds
+    if publishingSnapshots {
+      for _ in 0..<ticks { host.stepOnce() }
+    } else {
+      fortress.run(ticks: ticks)
+    }
+    let elapsed = DispatchTime.now().uptimeNanoseconds - start
+    return (Double(elapsed) / Double(ticks) / 1_000_000, fortress)
+  }
+
+  let (msPerTick, fortress) = measure(publishingSnapshots: withSnapshot)
   let ticksPerSecond = 1000.0 / msPerTick
   print("scenario      \(scenario.name)")
   print("dwarves       \(scenario.dwarfCount)")
@@ -271,10 +305,149 @@ case "bench":
   print("materialized blocks \(fortress.map.materializedBlockCount) of \(fortress.map.blockCount)")
   print("tile storage  \(fortress.map.tileStorageBytes / 1024) KiB")
 
+  // Constitution (Quality Gates, v1.1.0): budgets state bytes touched per tick
+  // alongside ms/tick. On a unified-memory SoC one controller serves CPU and
+  // GPU, so ms/tick measured on one machine hides the ceiling the architecture
+  // actually hits -- and unlike a time, this figure is comparable across
+  // machines and checkable against a design before the code exists.
+  if withSnapshot {
+    // `buildSnapshot` draws `depthLayers + 1` layers -- the focused level plus
+    // the levels below it. Multiplying by `depthLayers` alone under-reported
+    // this by a whole layer (25% at the default 4).
+    let layers = max(1, renderCamera.depthLayers + 1)
+    let instanceBytes = renderCamera.tileCount * layers * MemoryLayout<TileInstance>.stride
+    print("camera        \(renderCamera.size.x)x\(renderCamera.size.y), \(layers) layers")
+    print("bytes/tick    \(instanceBytes) (\(instanceBytes / 1024) KiB of instances published)")
+    print(
+      String(
+        format: "bandwidth     %.2f GB/s at %d ticks/s",
+        Double(instanceBytes) * Double(SimulationHost.ticksPerSecond) / 1_000_000_000,
+        SimulationHost.ticksPerSecond))
+
+    // PC-002 is a statement about the *delta* a window imposes, not about an
+    // absolute cost. Gating on a total was gating on a proxy: drift in the
+    // baseline silently changed what the threshold meant, and the delta itself
+    // only ever got computed by a human reading a comment. Measure both arms
+    // here so the gate checks the requirement as written.
+    if let snapshotBudget = arguments.string("snapshot-budget-ms").flatMap(Double.init) {
+      let baseline = measure(publishingSnapshots: false).msPerTick
+      let delta = msPerTick - baseline
+      print(String(format: "baseline      %.4f ms/tick (no snapshot)", baseline))
+      print(String(format: "snapshot cost %.4f ms/tick (PC-002 budget %.4f)", delta, snapshotBudget))
+      if delta > snapshotBudget {
+        print(
+          String(
+            format: "FAIL: snapshot adds %.4f ms/tick, exceeding PC-002's %.4f ms/tick",
+            delta, snapshotBudget))
+        exit(1)
+      }
+    }
+  }
+
   if let budget, msPerTick > budget {
     print(String(format: "FAIL: %.4f ms/tick exceeds budget of %.4f ms/tick", msPerTick, budget))
     exit(1)
   }
+
+// MARK: - ui-session
+
+case "ui-session":
+  // T014 / SC-004. Drives the real input path -- the same `InputMap` and
+  // `HitTest` the window uses -- from a scripted, deterministic gesture list,
+  // and records the resulting command stream as a replay fixture.
+  //
+  // The point is not to test clicking. It is to prove that input reaches the
+  // simulation *only* as commands: if a view action ever mutated state, or if
+  // hit testing were not a pure function of (click, camera, zoom), the
+  // recorded stream would not reproduce the run it came from, and
+  // `replay --assert-hashes` would say so.
+  let scenario = resolveScenario(arguments.string("scenario", default: "small-dig")!)
+  let seed = arguments.uint64("seed", default: 1)
+  let ticks = arguments.int("ticks", default: 2000)
+  let interval = arguments.int("hash-interval", default: 100)
+  guard let output = arguments.string("out") else { fail("ui-session requires --out <path>") }
+
+  let fortress = Fortress.make(scenario: scenario, seed: seed, jobs: JobSystem())
+  var controller = CameraController(
+    camera: Camera(
+      origin: Coord3(0, 0, Int32(scenario.mapSize.z) - 2),
+      size: Coord3(40, 24, 1),
+      depthLayers: 2),
+    pixelsPerTile: 8,
+    mapSize: scenario.mapSize)
+  let inputMap = InputMap()
+  // Driving the real host, not a hand-rolled loop: the fixture is supposed to
+  // prove the *windowed* path replays, and the snapshot side of that path is
+  // about to change when dirty-flag reuse lands.
+  let host = SimulationHost(fortress: fortress, camera: controller.camera)
+
+  // A fixed gesture script. Camera moves are interleaved with clicks on
+  // purpose: a click's meaning depends on where the camera is, so a bug that
+  // let a view action leak into state would change the designations that
+  // follow it and break the hashes downstream.
+  enum Gesture {
+    case key(KeyStroke)
+    case click(Click)
+  }
+  let script: [(tick: Int, gesture: Gesture)] = [
+    (100, .click(Click(x: 84.0, y: 84.0))),
+    (200, .key(KeyStroke(.right, shift: true))),
+    (300, .click(Click(x: 12.5, y: 36.9))),
+    (400, .key(KeyStroke(.down))),
+    (500, .click(Click(x: 160.0, y: 100.0))),
+    (600, .key(KeyStroke(.character("+")))),
+    (700, .click(Click(x: 200.0, y: 40.0))),
+    (800, .key(KeyStroke(.pageDown))),
+    (900, .click(Click(x: 64.0, y: 64.0))),
+    (1000, .key(KeyStroke(.left))),
+    (1100, .click(Click(x: 100.0, y: 150.0))),
+  ]
+
+  var checkpoints: [Replay.Checkpoint] = []
+  for tick in 0..<ticks {
+    for entry in script where entry.tick == tick {
+      let action: InputAction
+      switch entry.gesture {
+      case .key(let stroke):
+        action = inputMap.action(for: stroke)
+      case .click(let click):
+        action = inputMap.action(
+          for: click, camera: controller.camera, pixelsPerTile: controller.pixelsPerTile)
+      }
+      switch action {
+      case .view(let viewAction):
+        controller.apply(viewAction)
+        host.setCamera(controller.camera)
+      case .fortress(let command):
+        host.submit(command)
+      case .ignored:
+        break
+      }
+    }
+    // Publishes a snapshot every tick, as a real window would.
+    host.stepOnce()
+    if interval > 0, (tick + 1) % interval == 0 {
+      checkpoints.append(Replay.Checkpoint(tick: UInt64(tick + 1), hash: host.stateHash))
+    }
+  }
+
+  let session = Replay(
+    seed: seed,
+    mapSize: scenario.mapSize,
+    tickCount: UInt64(ticks),
+    hashInterval: UInt32(interval),
+    commands: host.recording,
+    checkpoints: checkpoints
+  )
+  do {
+    try session.write(to: output)
+  } catch {
+    fail("could not write \(output): \(error)")
+  }
+  print(
+    "recorded UI session: \(ticks) ticks, \(session.commands.count) commands, "
+      + "\(checkpoints.count) checkpoints -> \(output)")
+  print("final hash \(String(host.stateHash, radix: 16))")
 
 // MARK: - shot
 
@@ -344,6 +517,11 @@ default:
                          --scenario --seed --ticks --threads 1,2,3,7,16,64
       bench              Measure ms/tick
                          --scenario --seed --ticks --budget-ms
+                         --with-snapshot   also publish a snapshot each tick
+                         --width --height --layers   snapshot camera
+                         --snapshot-budget-ms   gate PC-002 on the delta
+      ui-session         Record a scripted-input session as a replay fixture
+                         --scenario --seed --ticks --hash-interval --out
       shot               Render a frame to a PNG, headless
                          --scenario --seed --tick --z --x --y --width --height
                          --layers --tileset --scale --out

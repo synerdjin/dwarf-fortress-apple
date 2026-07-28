@@ -12,10 +12,39 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
 | Branch | `investigate/ki-001` (PR #5), off `main` after PR #4 merged. `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | **Constitution v1.1.0 approved in full and in force** (`docs/decisions/0003`). Before that: KI-001 root-caused and mitigated (PR #5); review remediation P0 batch (PR #3). |
-| Next | **M1 phases 4–5** (window, camera, click-to-designate) — nothing is blocked. Then P1 backlog items 8–12, which gate the M3 spec freeze, and which v1.1.0 now makes mandatory rather than advisory. |
+| Last completed | **M1 phases 4–5 (T011–T017)**: DFUI, window, camera, click-to-designate, UI-session fixture, snapshot benches, CI gates. Before that: constitution v1.1.0 in force; KI-001 root-caused. |
+| Next | Owner decision on the PC-001/PC-002 conflict below, then **P1 backlog items 8–12**, which gate the M3 spec freeze and which v1.1.0 makes mandatory rather than advisory. Item 9 is now also the fix for the snapshot cost. |
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
 | Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
+
+## Pending owner decisions
+
+- **PC-001 and PC-002 are not jointly satisfiable as written.** At 300×200 —
+  PC-001's own viewport — snapshot publication costs **2.29 ms/tick** against
+  PC-002's 1 ms budget. At 144×144 it costs **0.87 ms/tick and passes**, on the
+  Apple Silicon hardware the constitution and this project target. Cause:
+  `buildSnapshot` (`Tileset.swift:126`) rebuilds every visible tile every tick;
+  the per-block dirty-flag reuse the plan's Cost Control paragraph describes was
+  never implemented, and cannot be built on `Block.dirty`, which review §4.3
+  establishes is renderer-owned. A correct fix needs the sim-owned dirty bits of
+  **P1 backlog item 9**. Choose: amend PC-002, pull item 9 forward, or close M1
+  with the gap recorded. Detail and the measurement table:
+  `specs/001-metal-tilemap-renderer/tasks.md`.
+
+  **CI gate ≠ this compliance status.** `Scripts/ci.sh`'s gates do not use
+  PC-002's literal 1.0 ms/tick threshold — GitHub's hosted macOS runner is both
+  slower and considerably noisier than the devbox for this CPU-only work (no
+  GPU involved). Two consecutive PR #8 runs at 144×144, 2026-07-27/28:
+  **1.2555, then 1.8288 ms/tick — a 46% swing run to run** on presumably
+  similar hardware. The 300×200 gate's first real hosted reading, 4.9349
+  ms/tick, passed an interim 5.0 threshold by 1.3% — a near miss, not
+  headroom, and exactly the kind of number the 46% swing says will flip to a
+  false failure on its own. Both gates are now 3× the worst hosted reading on
+  record (144×144: 5.5; 300×200: 15.0), matching the plain bench gate's own
+  convention in the same file. Worth noting for the PC-001/PC-002 decision
+  above: 300×200's hosted delta (4.93 ms/tick) is proportionally *worse* than
+  its local one (2.29–2.36), so the compliance gap does not shrink under
+  real-world variance — it widens.
 
 ## Pending owner approvals
 
@@ -61,6 +90,21 @@ before re-blessing. When parallel agents exist, split this table.
   Sole owner of the fixture per the table above; recorded here before re-blessing.
 
 ## Session log (newest first, keep last ~5)
+
+- 2026-07-27: **M1 phases 4–5 complete** (T011–T017). New `DFUI` target that
+  deliberately cannot import `DFECS`, so Constitution III is enforced by the
+  module graph; new `dwarffortress` window executable, the only target linking
+  AppKit. Instance buffers now rotate per in-flight frame (review §5.2), with
+  the caller contract stated and a test that breaks if any slot is unfilled.
+  `dfsim ui-session` records a scripted-input fixture; it replays 20/20.
+  **Two things the next agent must not rediscover the hard way:** the plan's
+  snapshot Cost Control paragraph describes a dirty-flag optimization that was
+  never implemented, and as a result PC-001 and PC-002 are not jointly
+  satisfiable — see Pending owner decisions. **Also unverified: nobody has
+  looked at the window.** It runs for minutes without error and its threads
+  behave, but a bare executable has no bundle for screenshot tooling and
+  `screencapture` lacked permission, so NSEvent translation and CAMetalLayer
+  presentation are untested by anything. `swift run dwarffortress` to look.
 
 - 2026-07-27: **Constitution v1.1.0 approved in full by the owner and applied.**
   All nine clauses, Groups A–C; `constitution.md` is v1.1.0 and the draft file

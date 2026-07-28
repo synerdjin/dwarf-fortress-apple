@@ -41,7 +41,7 @@ public struct Scenario: Sendable {
     return commands
   }
 
-  public static let all: [Scenario] = [smallDig, twoHundredDwarves]
+  public static let all: [Scenario] = [smallDig, twoHundredDwarves, render300x200]
 
   public static func named(_ name: String) -> Scenario? {
     all.first { $0.name == name }
@@ -60,6 +60,27 @@ public struct Scenario: Sendable {
         .dig
       )
     ]
+  }
+
+  /// PC-001's scale: a viewport big enough to hold 300×200 visible tiles.
+  ///
+  /// The map is deliberately larger than the viewport. A map exactly the size
+  /// of the camera would let the snapshot builder skip the visibility
+  /// intersection entirely, which is the work the budget exists to measure.
+  public static let render300x200 = Scenario(
+    name: "render-300x200",
+    mapSize: Coord3(320, 224, 16),
+    dwarfCount: 200
+  ) { size in
+    let top = size.z - 1
+    return (0..<4).map { index in
+      let originX = Int32(20 + (index % 2) * 150)
+      let originY = Int32(20 + (index / 2) * 100)
+      return .designate(
+        Region3(origin: Coord3(originX, originY, top - 1), size: Coord3(60, 40, 1)),
+        .dig
+      )
+    }
   }
 
   /// The plan's headline scale: 200 dwarves on a 3×3-embark-sized map.

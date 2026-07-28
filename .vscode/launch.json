@@ -1,0 +1,94 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Debug dfsim",
+            "target": "dfsim",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug dfsim"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Release dfsim",
+            "target": "dfsim",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release dfsim"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [
+                "--scenario",
+                "small-dig",
+                "--zoom",
+                "12"
+            ],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Debug dwarffortress (window)",
+            "target": "dwarffortress",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug dwarffortress"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [
+                "--scenario",
+                "small-dig",
+                "--zoom",
+                "12"
+            ],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Release dwarffortress (window)",
+            "target": "dwarffortress",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release dwarffortress"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Debug dftest",
+            "target": "dftest",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug dftest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Release dftest",
+            "target": "dftest",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release dftest"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Debug dwarffortress",
+            "target": "dwarffortress",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug dwarffortress"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:dwarf-fortress-apple}",
+            "name": "Release dwarffortress",
+            "target": "dwarffortress",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release dwarffortress"
+        }
+    ]
+}

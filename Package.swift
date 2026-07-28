@@ -17,7 +17,9 @@ let package = Package(
         .library(name: "DFECS", targets: ["DFECS"]),
         .library(name: "DFSim", targets: ["DFSim"]),
         .library(name: "DFRender", targets: ["DFRender"]),
+        .library(name: "DFUI", targets: ["DFUI"]),
         .executable(name: "dfsim", targets: ["dfsimCLI"]),
+        .executable(name: "dwarffortress", targets: ["dwarffortress"]),
         .executable(name: "dftest", targets: ["DFTests"]),
     ],
     targets: [
@@ -28,12 +30,27 @@ let package = Package(
         // it, so the simulation stays buildable and testable with no graphics
         // stack present.
         .target(name: "DFRender", dependencies: ["DFSim"], swiftSettings: .df),
+        // DFUI deliberately does NOT depend on DFECS. It cannot reach `World`,
+        // so Constitution III ("sim state is mutated only by applying Command
+        // values from a queue") is enforced by the module graph rather than by
+        // discipline -- there is no import that would let a click handler write
+        // a component even if someone tried.
+        .target(name: "DFUI", dependencies: ["DFCore", "DFSim"], swiftSettings: .df),
         .executableTarget(
             name: "dfsimCLI",
-            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender"],
+            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],
             // Not "Sources/dfsim": the filesystem is case-insensitive, so that
             // path collides with the DFSim library target.
             path: "Sources/DFSimCLI",
+            swiftSettings: .df
+        ),
+        // The windowed app. Nothing depends on it, and it is the only target
+        // that links AppKit -- so the simulation, the tests and `dfsim` all
+        // stay buildable and runnable with no window server present.
+        .executableTarget(
+            name: "dwarffortress",
+            dependencies: ["DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],
+            path: "Executables/dwarffortress",
             swiftSettings: .df
         ),
         // Tests are an executable, not a `.testTarget`. Neither swift-testing
@@ -42,7 +59,7 @@ let package = Package(
         .target(name: "DFTesting", swiftSettings: .df),
         .executableTarget(
             name: "DFTests",
-            dependencies: ["DFTesting", "DFCore", "DFECS", "DFSim", "DFRender"],
+            dependencies: ["DFTesting", "DFCore", "DFECS", "DFSim", "DFRender", "DFUI"],
             swiftSettings: .df
         ),
     ]
