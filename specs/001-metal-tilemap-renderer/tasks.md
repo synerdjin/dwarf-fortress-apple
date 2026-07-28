@@ -48,7 +48,15 @@ Ordered by dependency. Each task names how it is verified, per Constitution V.
 
 ## Phase 5 — Gates
 
-- **T015** `render-300x200` bench scenario (PC-001).
+- **T015** `render-300x200` bench scenario (PC-001). **Not actually done —
+  found 2026-07-27 while reviewing the CI split (docs/state.md): the
+  `render-300x200` *scenario* exists and is used by `determinism-check` and by
+  T016's `--with-snapshot` bench, but nothing calls into `TilemapRenderer`'s
+  real Metal draw pass and times it. `--with-snapshot` measures CPU-side
+  snapshot *publication* (PC-002's subject), not GPU frame time (PC-001's).
+  PC-001 — "300×200 sustains refresh rate, < 8.3 ms/frame" — has never been
+  measured, hosted or local. Needs a GPU-timed frame-render bench; local-only,
+  since hosted runners have no Metal device to time in the first place.**
 - **T016** Snapshot cost bench (PC-002).
 - **T017** Wire into `Scripts/ci.sh`.
 

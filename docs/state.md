@@ -29,6 +29,13 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
   done (dirty-bit/snapshot-gating slice only — see Session log).** Items 8,
   10–12 remain and gate the M3 spec freeze. Item 9's temperature-split and
   hash-digest-caching half is also still open, deferred deliberately.
+- **PC-001 has never actually been measured** (found 2026-07-27 while
+  reviewing the hosted-vs-local CI split): `--with-snapshot` times CPU-side
+  snapshot publication (PC-002's subject), not the Metal draw pass PC-001 is
+  about — "300×200 sustains refresh rate, < 8.3 ms/frame" has no bench,
+  hosted or local. `specs/001-metal-tilemap-renderer/tasks.md` T015. Needs a
+  GPU-timed frame-render bench; local-only, since hosted runners have no
+  Metal device to time in the first place.
 - Deviations from the backlog as written, both argued in their commits:
   item 3 unified rounding on truncate-toward-zero rather than floor (floor
   cannot satisfy the negation identity the item asks for); item 5 hashed the
