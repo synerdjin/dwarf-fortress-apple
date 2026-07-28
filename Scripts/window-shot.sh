@@ -24,28 +24,42 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 OUT="${1:-out/window.png}"
-[ $# -gt 0 ] && shift || true
-[ "${1:-}" = "--" ] && shift || true
+[ $# -gt 0 ] && shift
+[ "${1:-}" = "--" ] && shift
 APP_ARGS=("$@")
 [ ${#APP_ARGS[@]} -eq 0 ] && APP_ARGS=(--scenario small-dig --zoom 24)
 
 mkdir -p "$(dirname "$OUT")"
 
+RUNNING="$(pgrep -x dwarffortress || true)"
+COUNT="$(printf '%s\n' "$RUNNING" | grep -c . || true)"
+if [ "$COUNT" -gt 1 ]; then
+  # Which instance would `pgrep | head -1` even mean? Nothing here decided
+  # that, so a capture in this state is a screenshot of an unknown window --
+  # worse than useless for something whose whole job is "look and trust it".
+  echo "error: $COUNT dwarffortress processes running (pids: $(printf '%s' "$RUNNING" | tr '\n' ' '))" >&2
+  echo "kill the stale ones first: pkill -x dwarffortress" >&2
+  exit 1
+fi
+
 launched=0
-if ! pgrep -x dwarffortress > /dev/null; then
+PID="$RUNNING"
+if [ -z "$PID" ]; then
   swift build -c release --product dwarffortress > /dev/null
   # Frame logging on: a window that is up but drawing nothing looks identical
   # to a working one in `ps`, and reads as *lower* CPU.
-  DF_FRAME_LOG=1 nohup "$(swift build -c release --show-bin-path)/dwarffortress" \
-    "${APP_ARGS[@]}" > out/window-shot.log 2>&1 &
+  DF_FRAME_LOG=1 nohup .build/release/dwarffortress "${APP_ARGS[@]}" \
+    > out/window-shot.log 2>&1 &
   launched=1
-  sleep 3
-fi
+  PID=$!
 
-PID="$(pgrep -x dwarffortress | head -1)"
-if [ -z "$PID" ]; then
-  echo "dwarffortress is not running and could not be started; see out/window-shot.log" >&2
-  exit 1
+  # Poll for the window rather than sleeping a guessed duration: launch is
+  # usually well under a second, and a fixed sleep pays that worst case on
+  # every single capture.
+  for _ in $(seq 1 50); do
+    [ -n "$(swift Scripts/window-id.swift "$PID" 2>/dev/null)" ] && break
+    sleep 0.1
+  done
 fi
 
 # Largest window owned by the process: its content window, not the menu bar

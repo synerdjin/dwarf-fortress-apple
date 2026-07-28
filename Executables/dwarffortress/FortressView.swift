@@ -41,9 +41,6 @@ final class FrameDrawer: NSObject, CAMetalDisplayLinkDelegate, @unchecked Sendab
     self.ring = ring
   }
 
-  /// Total frames presented since launch. Read from the render thread only.
-  var frameCount: Int { presentedFrames }
-
   private func countFrame() {
     presentedFrames += 1
     guard logFrames else { return }
