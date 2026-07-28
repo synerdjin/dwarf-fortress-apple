@@ -158,49 +158,51 @@ swift run -c release dfsim bench --scenario 200-dwarves --ticks 5000 \
 # real cost a real window pays, so it must not be hidden here -- it is
 # measured separately below.
 #
-# Measured 2026-07-27/28:
-#   Apple M4 (dev machine)       0.868 ms/tick  -- inside PC-002's 1.0 budget
-#   GitHub hosted runner, run 1  1.2555 ms/tick -- over it, failed CI
-#   GitHub hosted runner, run 2  1.8288 ms/tick -- a 46% swing from run 1
-# That swing is the reason this is 3x the *worse* hosted reading rather than
-# the first one: two consecutive runs disagreeing by 46% means a threshold
-# fit to a single sample is a coin flip away from a false failure, which
-# looks exactly like a real regression to whoever hits it next. Same
-# situation as the plain bench gate above, and the same fix -- 3x the slower
-# of local/hosted. This does NOT mean PC-002 is unmet -- it is met, on the
-# Apple Silicon hardware the constitution and this project actually target;
-# the hosted runner has no Metal device either and is already documented
-# elsewhere (docs/state.md) as proving less than a local run. The literal
-# 1.0 ms/tick PC-002 compliance evidence is the devbox number above, not
-# this gate's threshold.
+# Measured 2026-07-27, after P1 backlog item 9's sim-owned per-block
+# `contentRevision` + `SnapshotCache` landed (docs/state.md, plan.md Cost
+# Control), in two stages:
+#   stage 1, per-tile revision check   0.3667-0.3758 ms/tick (2.3-2.4x under
+#            the pre-fix 0.868)
+#   stage 2, block-chunked revision    0.0699-0.1340 ms/tick (a further
+#            ~3x, from checking a block's revision once per 16-wide run of
+#            columns instead of once per column)
+# Comfortably inside PC-002's 1.0 budget with real headroom now, not a thin
+# margin.
+#
+# No fresh hosted-runner number for the fixed code yet -- this PR's own CI run
+# will be the first. Following this file's established practice (the 300x200
+# gate below started the same way, padded from a local estimate before hosted
+# data existed, then tightened as real hosted numbers came in): 3x the worst
+# local reading, rounded up, as an interim tripwire pending that first hosted
+# run. Tighten again once it lands.
 swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
-  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 5.5 \
+  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 0.5 \
   || fail "PC-002: snapshot publication regressed past its CI tolerance at 144x144"
 
-# PC-001's own viewport, where PC-002 does NOT hold. 300x200 on the larger
+# PC-001's own viewport. Before this fix, 300x200 on the larger
 # render-300x200 map (320x224, so the viewport fits and this is all real
-# in-map work) costs ~2.3-2.4 ms/tick of snapshot on the Apple M4 -- ~2.3x
-# what PC-002 allows.
+# in-map work) cost ~2.3-2.4 ms/tick of snapshot -- ~2.3x what PC-002 allows,
+# and PC-001/PC-002 were not jointly satisfiable at any threshold. That is
+# what P1 backlog item 9 (sim-owned per-block `contentRevision` +
+# `SnapshotCache`, docs/state.md) was pulled forward to fix.
 #
-# Not a regression and not a mystery: `buildSnapshot` rebuilds every visible
-# tile every tick, because the per-block dirty-flag reuse the plan's Cost
-# Control section describes was never implemented. The fix needs the sim-owned
-# dirty bits of P1 backlog item 9. Tracked in docs/state.md as an owner
-# decision. This gate is a tripwire on today's number, deliberately not
-# PC-002's 1.0, so it stays honest about failing the requirement instead of
-# pretending a laxer requirement is the real one.
+# Measured 2026-07-27, same two stages as above, same method:
+#   stage 1, per-tile revision check   0.9265-1.0178 ms/tick -- right at the
+#            1.0 boundary, occasionally over it under real load (observed
+#            once, running this exact gate inside a full ci.sh pass). A real
+#            2.3x win over the pre-fix number, but a coin-flip margin, not
+#            solid compliance.
+#   stage 2, block-chunked revision    0.2141-0.2182 ms/tick -- ~4.6x under
+#            the 1.0 budget, and the tightest variance seen on any bench in
+#            this file. The chunking mattered far more at this scale: a wider
+#            viewport means more per-row block-boundary crossings for the
+#            naive per-tile check to pay for individually.
 #
-# Measured on the hosted runner 2026-07-28: 4.9349 ms/tick, against a local
-# ~2.35-2.36. That is the run this step first executed on (the prior CI
-# attempt died at the 144x144 gate above before reaching this one), and it
-# passed the 5.0 tripwire that was in place by 1.3% -- not real headroom, a
-# near miss. The same 46% run-to-run swing seen at 144x144 (see above) means
-# a threshold sized to one hosted sample is not safe to leave at a razor's
-# edge: the very next run could read higher on pure noise and fail for
-# nothing. 3x this measurement, matching the convention used everywhere else
-# in this file.
+# No hosted number yet for the fixed code; same interim-tripwire reasoning as
+# above -- 3x the worst local reading, rounded up, pending the first hosted
+# run on this exact change.
 swift run -c release dfsim bench --scenario render-300x200 --ticks 2000 \
-  --with-snapshot --snapshot-budget-ms 15.0 \
+  --with-snapshot --snapshot-budget-ms 0.8 \
   || fail "render-300x200 snapshot cost regressed past its CI tripwire"
 
 printf '\n\033[32mAll gates passed.\033[0m\n'

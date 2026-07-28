@@ -104,10 +104,63 @@ M0 measured 0.10 ms/tick for simulation alone. PC-002 allows snapshotting to
 take up to ten times the entire current simulation cost, which sounds generous
 and is: it is a ceiling to catch pathological work, not a target.
 
-**Cost control**: the snapshot rebuilds only blocks whose dirty flag is set,
-intersected with the visible region. `MapStore` already maintains per-block
-dirty flags and clears them on demand — this is what they were for. A paused
-fortress with a still camera rebuilds nothing.
+**Cost control (amended 2026-07-27, P1 backlog item 9, dirty-bit slice only)**:
+the original text here said the snapshot "rebuilds only blocks whose dirty flag
+is set" and that "`MapStore` already maintains per-block dirty flags and clears
+them on demand — this is what they were for." Phase 4–5 (tasks.md) found that
+optimization was never implemented, and review §4.3 found the premise wrong:
+`Block.dirty` is cleared by a single consumer after upload, which cannot be
+reused here because the ring publishes into three rotating buffers — clearing
+the flag after writing buffer A would hide the change from buffers B and C the
+next two times they are written, silently going stale rather than failing loud.
+
+The actual mechanism: `MapStore` tracks a **sim-owned, monotonic** per-block
+`contentRevision` (`MapStore.swift`), bumped on any tile write that changes a
+value — a superset of the existing passability-only `revision`, which stays as
+it was for pathfinding. Monotonic-and-never-cleared means any number of
+independent readers can each remember "the revision I last saw" with no shared
+clear to race on. `SnapshotCache` (`Tileset.swift`) is the one reader today: it
+holds the last camera used and the last-computed instance for every visible
+slot, keyed by that slot's block's `contentRevision`. On each `buildSnapshot`
+call with a cache: a camera change invalidates the whole cache (new slots mean
+old cached values are for the wrong coordinates); otherwise each slot is
+recomputed only if its block's revision differs from what the cache last saw,
+and the unchanged majority are copied from the cache instead of re-fetched from
+`MapStore` and re-run through `Tileset.appearance`. A paused fortress with a
+still camera therefore does no tile lookups and no appearance computation at
+all — every slot is a cache hit.
+
+The revision check itself is done **per block, not per tile**: the inner loop
+walks each row in runs aligned to the 16-wide block boundary in world-x (not
+camera-x, which need not be block-aligned), calling
+`blockContentRevision(at:)` once per run and applying its result to every slot
+in the run. A first version checked once per tile and measured right at
+PC-002's boundary at 300×200 (0.93–1.02 ms/tick — a real ~2.3x win over the
+unoptimized 2.29–2.4, but a coin-flip margin, occasionally over 1.0 under real
+load). Block-chunking the check cut it a further ~4-5x (0.21–0.22 ms/tick at
+300×200, 0.07–0.13 at 144×144) — checking a 16-tile run once instead of
+16 times turned out to matter more than eliminating the tile fetch and
+appearance computation had, at this scale.
+
+`contentRevision` is deliberately never hashed: it is cache-invalidation
+bookkeeping, not simulation state, per the constitution's "derived state may
+affect cost, never results." Two fortresses with identical tiles but different
+edit histories must still hash identically; `MapStoreTests` asserts this
+directly for the new field.
+
+The cache is opt-in: `buildSnapshot(camera:tileset:into:)` (no cache argument)
+is unchanged and still does the full rebuild every call, so every existing
+caller and test (`dfsim shot`, `RenderTests`, the reproducibility test) keeps
+its current, simplest-to-reason-about behavior. Only `SimulationHost` — the
+tick-rate path PC-002 actually measures — owns a persistent `SnapshotCache` and
+passes it in.
+
+Not addressed by this change, and explicitly out of scope for it (see tasks.md
+Phase 4–5 status): per-block cached *hash* digests (the other half of backlog
+item 9) and splitting `temperature` out of `Tile`. Both remain real M3
+concerns; neither is needed to make PC-001/PC-002 jointly satisfiable, and
+bundling them in would have made this a second hash-affecting change for no
+gain toward that goal.
 
 ## Tick Placement and Component Access
 

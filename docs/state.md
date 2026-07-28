@@ -10,41 +10,12 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 | | |
 |---|---|
 | Active milestone | `specs/001-metal-tilemap-renderer` (SPEC-M1-VIEW) |
-| Branch | `investigate/ki-001` (PR #5), off `main` after PR #4 merged. `m1-metal-tilemap-renderer` still exists remotely at the older `72c4318`. |
+| Branch | `m1-dirty-flag-snapshot`, off `m1-window-and-input` (merged to `main` as PR #8). Awaiting PR/review. `m1-metal-tilemap-renderer` (the branch named in this repo's PR-target convention) is stale, still at the pre-PR#8 commit — PRs #6 onward have actually targeted `main`; worth a decision on which name is authoritative before the next branch. |
 | Spec status | Approved (retroactive) — `docs/decisions/0001-retroactive-approvals-2026-07-27.md`. M0 spec amended 2026-07-27 to declare `SPEC-M0-MAP`/`SPEC-M0-SIM`. |
-| Last completed | **M1 phases 4–5 (T011–T017)**: DFUI, window, camera, click-to-designate, UI-session fixture, snapshot benches, CI gates. Before that: constitution v1.1.0 in force; KI-001 root-caused. |
-| Next | Owner decision on the PC-001/PC-002 conflict below, then **P1 backlog items 8–12**, which gate the M3 spec freeze and which v1.1.0 makes mandatory rather than advisory. Item 9 is now also the fix for the snapshot cost. |
+| Last completed | **PC-001/PC-002 conflict resolved** (P1 backlog item 9, dirty-bit/snapshot-gating slice — see Session log). Before that: M1 phases 4–5 (T011–T017); constitution v1.1.0 in force; KI-001 root-caused. |
+| Next | **P1 backlog items 8, 10–12** (item 9 done, this slice of it), which gate the M3 spec freeze and which v1.1.0 makes mandatory rather than advisory. Item 9's other half — temperature split out of `Tile`, per-block cached hash digests — remains scheduled, deliberately deferred (see Session log). |
 | Blocking issues | **None.** KI-001 root-caused 2026-07-27 (Swift 6.3.3 leaves `MTLBuffer.contents()` in the arm64 `swifterror` register `x21` on a non-throwing path; caller misreads it as a throw). Mitigated, `docs/known-issues.md` rewritten. Residual: not yet filed upstream — needs a standalone reducer. |
-| Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. |
-
-## Pending owner decisions
-
-- **PC-001 and PC-002 are not jointly satisfiable as written.** At 300×200 —
-  PC-001's own viewport — snapshot publication costs **2.29 ms/tick** against
-  PC-002's 1 ms budget. At 144×144 it costs **0.87 ms/tick and passes**, on the
-  Apple Silicon hardware the constitution and this project target. Cause:
-  `buildSnapshot` (`Tileset.swift:126`) rebuilds every visible tile every tick;
-  the per-block dirty-flag reuse the plan's Cost Control paragraph describes was
-  never implemented, and cannot be built on `Block.dirty`, which review §4.3
-  establishes is renderer-owned. A correct fix needs the sim-owned dirty bits of
-  **P1 backlog item 9**. Choose: amend PC-002, pull item 9 forward, or close M1
-  with the gap recorded. Detail and the measurement table:
-  `specs/001-metal-tilemap-renderer/tasks.md`.
-
-  **CI gate ≠ this compliance status.** `Scripts/ci.sh`'s gates do not use
-  PC-002's literal 1.0 ms/tick threshold — GitHub's hosted macOS runner is both
-  slower and considerably noisier than the devbox for this CPU-only work (no
-  GPU involved). Two consecutive PR #8 runs at 144×144, 2026-07-27/28:
-  **1.2555, then 1.8288 ms/tick — a 46% swing run to run** on presumably
-  similar hardware. The 300×200 gate's first real hosted reading, 4.9349
-  ms/tick, passed an interim 5.0 threshold by 1.3% — a near miss, not
-  headroom, and exactly the kind of number the 46% swing says will flip to a
-  false failure on its own. Both gates are now 3× the worst hosted reading on
-  record (144×144: 5.5; 300×200: 15.0), matching the plain bench gate's own
-  convention in the same file. Worth noting for the PC-001/PC-002 decision
-  above: 300×200's hosted delta (4.93 ms/tick) is proportionally *worse* than
-  its local one (2.29–2.36), so the compliance gap does not shrink under
-  real-world variance — it widens.
+| Remote | https://github.com/synerdjin/dwarf-fortress-apple. `main` protected: requires the `Scripts/ci.sh` check (enforced for admins too), no force-push/deletion. CI: `.github/workflows/ci.yml` runs `Scripts/ci.sh` with `CI_ALLOW_NO_GPU=1` — the hosted runners have no Metal device, so a green CI run proves less than a green local one and never covers DFRender. **No hosted-runner reading yet for the snapshot-cache fix** — this branch's own CI run will be the first; `Scripts/ci.sh`'s two new gates are interim 3×-local tripwires (0.5 / 0.8 ms/tick) pending it. |
 
 ## Pending owner approvals
 
@@ -54,8 +25,10 @@ reconcile. Keep this file under ~40 lines; it is a pointer board, not a journal.
 
 ## Open work queues
 
-- Remediation backlog: `docs/review-2026-07-27.md` §7. **P0 (1–7) done.** P1
-  (8–14) is next after the v1.1.0 amendments; items 8–12 gate the M3 spec freeze.
+- Remediation backlog: `docs/review-2026-07-27.md` §7. **P0 (1–7) done. Item 9
+  done (dirty-bit/snapshot-gating slice only — see Session log).** Items 8,
+  10–12 remain and gate the M3 spec freeze. Item 9's temperature-split and
+  hash-digest-caching half is also still open, deferred deliberately.
 - Deviations from the backlog as written, both argued in their commits:
   item 3 unified rounding on truncate-toward-zero rather than floor (floor
   cannot satisfy the negation identity the item asks for); item 5 hashed the
@@ -91,6 +64,37 @@ before re-blessing. When parallel agents exist, split this table.
 
 ## Session log (newest first, keep last ~5)
 
+- 2026-07-27 (later session): **PC-001/PC-002 conflict resolved** — owner chose
+  "pull item 9 forward," scoped to just the dirty-bit/snapshot-gating slice
+  (temperature split and per-block hash-digest caching stay deferred, un-hash-
+  affecting M3 work; this change touches no golden hash at all).
+  `MapStore` gained a sim-owned, monotonic per-block `contentRevision`
+  (superset of the existing passability-only `revision`); `Tileset.swift`
+  gained `SnapshotCache` and a cached `buildSnapshot` overload that skips
+  recomputing a slot when its block's revision is unchanged, checked once per
+  16-wide block-aligned column run rather than once per tile — the chunking
+  turned out to matter more than the cache itself once measured (see below).
+  `SimulationHost` is the only caller that uses it; every other caller
+  (`dfsim shot`, `RenderTests`, the plain `buildSnapshot`/`snapshot(camera:)`)
+  is byte-for-byte unchanged. New test in `UITests.swift` compares the cached
+  path against an uncached reference fortress at six tick checkpoints spanning
+  designation, active digging, and completed digging, plus a camera pan
+  mid-run; two new `MapStoreTests` assert the revision bumps on *any* change
+  (not just passability, unlike `revision`) and is excluded from `stateHash`.
+  All three broken once (`contentRevision &+= 1` commented out) and confirmed
+  to fail before being restored.
+
+  Measured in two stages, Apple M4, ten runs each, `--with-snapshot` delta:
+  per-tile revision check landed at 0.93–1.02 ms/tick at 300×200 — a real 2.3x
+  win over the pre-fix 2.29–2.4, but a coin-flip margin against PC-002's 1.0
+  budget (one sample read over it inside a full `ci.sh` run). Block-chunking
+  the same check cut it a further ~4-5x: **0.070–0.134 ms/tick at 144×144,
+  0.214–0.218 at 300×200** — both comfortably under budget now, PC-001's own
+  viewport included. Detail: `specs/001-metal-tilemap-renderer/plan.md`'s
+  amended Cost Control paragraph and `tasks.md`'s Phase 4–5 resolution section.
+  `Scripts/ci.sh`'s two snapshot gates are retightened to 0.5/0.8 ms/tick (3×
+  local, interim pending this branch's first hosted CI run).
+
 - 2026-07-27: **M1 phases 4–5 complete** (T011–T017). New `DFUI` target that
   deliberately cannot import `DFECS`, so Constitution III is enforced by the
   module graph; new `dwarffortress` window executable, the only target linking
@@ -100,7 +104,7 @@ before re-blessing. When parallel agents exist, split this table.
   **Two things the next agent must not rediscover the hard way:** the plan's
   snapshot Cost Control paragraph describes a dirty-flag optimization that was
   never implemented, and as a result PC-001 and PC-002 are not jointly
-  satisfiable — see Pending owner decisions. **Also unverified: nobody has
+  satisfiable *(resolved in the entry above this one)*. **Also unverified: nobody has
   looked at the window.** It runs for minutes without error and its threads
   behave, but a bare executable has no bundle for screenshot tooling and
   `screencapture` lacked permission, so NSEvent translation and CAMetalLayer
@@ -137,33 +141,7 @@ before re-blessing. When parallel agents exist, split this table.
   0003 Group C. Only non-draft code/doc change: a 128-byte cache-line note in
   `CLAUDE.md` conventions. Next agent: if 0003 is still unapproved, do not wait
   on it — M1 phases 4–5 and KI-001 item 13 are independent.
-- 2026-07-27: **P0 remediation batch complete** on `remediation/p0-batch`, six
-  commits, `Scripts/ci.sh` green (exit 0) end to end. Skills installed and
-  `scaffolding-patches/` retired; `determinism-check` widened to
-  `1,2,3,7,16,64`; `Fixed` rounding unified on truncate-toward-zero and the
-  `rounded` wrapping add fixed; counted `skip()` + `--max-skips` so a skip can
-  no longer read as a pass; pending commands hashed (**smoke.rec re-recorded**,
-  see Golden-hash changes); five ci.sh gates closed. Every new guard was broken
-  once and observed to fire — output quoted in each commit message. Next agent:
-  the constitution v1.1.0 amendments are now unblocked and are the next thing
-  the owner is waiting on.
-- 2026-07-27: PR #1 merged into `main`. Local and remote `main` and
-  `m1-metal-tilemap-renderer` are all fast-forwarded to the same commit
-  (`72c4318`) -- no divergence, safe starting point for the next session.
-  Next agent: read this file, then start the P0 batch (task queue has it
-  broken into #11 install-patches through #16).
-- 2026-07-27: Remote created by owner; PR #1 opened; GitHub Actions CI added
-  (`.github/workflows/ci.yml`, mirrors `Scripts/ci.sh` verbatim) and passed on
-  first run (0.18 ms/tick on the hosted runner, capture step legitimately
-  soft-skipped -- no Metal device on that runner). Branch protection on `main`
-  now requires the `Scripts/ci.sh` check, applies to admins, blocks
-  force-push/deletion -- closes backlog item 7. Note: `origin/main` had been
-  pushed pointing at the same commit as the feature branch (empty diff, no PR
-  possible); fixed with an explicitly confirmed force-push back to the
-  M0-complete commit, no commits lost.
-- 2026-07-27: Remediation plan approved (`docs/decisions/0002`): P0 batch before
-  amendments; Invariant VI adopted in principle. P0 queue: install patches, then
-  backlog items 1–7. Nothing implemented yet.
-- 2026-07-27: External review delivered (`docs/review-2026-07-27.md`,
-  `docs/review-scaffolding-2026-07-27.md`); decisions 0001 recorded; skills
-  patches staged; this file created.
+
+  *(Older entries — P0 remediation batch, PR #1 merge, remote setup, initial
+  review — trimmed per this section's own ~5-entry convention. See git log
+  and `docs/decisions/` for that history.)*

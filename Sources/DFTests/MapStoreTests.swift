@@ -150,6 +150,48 @@ func registerMapStoreTests() {
       expect(map.blockRevision(at: Coord3(1, 1, 0)) > start, "digging changes passability")
     }
 
+    test("The content revision bumps on any change, not just passability") {
+      // Unlike `revision`, a cosmetic-only edit (a designation) must still
+      // bump this one -- it exists to invalidate render caches, which care
+      // about every visible change, not only passability.
+      let map = MapStore(size: Coord3(32, 32, 1))
+      let start = map.blockContentRevision(at: Coord3(1, 1, 0))
+
+      map.modifyTile(Coord3(1, 1, 0)) { $0.designation = .dig }
+      expect(
+        map.blockContentRevision(at: Coord3(1, 1, 0)) > start,
+        "a designation is a visible change and must bump the content revision")
+
+      let afterCosmetic = map.blockContentRevision(at: Coord3(1, 1, 0))
+      map.setTile(Coord3(1, 1, 0), Tile(type: .floor))
+      expect(
+        map.blockContentRevision(at: Coord3(1, 1, 0)) > afterCosmetic,
+        "a structural change must also bump the content revision")
+
+      // A neighbouring, untouched block must not see its revision move.
+      expectEqual(map.blockContentRevision(at: Coord3(20, 20, 0)), 0)
+    }
+
+    test("The content revision is not part of the state hash") {
+      // It is cache-invalidation bookkeeping, not simulation state (same rule
+      // that keeps `Block.revision` and `recording` out of the hash): two maps
+      // with identical tiles but different edit histories -- and therefore
+      // different content revisions -- must still hash identically.
+      let direct = MapStore(size: Coord3(32, 32, 1))
+      direct.setTile(Coord3(5, 5, 0), Tile(type: .floor))
+
+      let churned = MapStore(size: Coord3(32, 32, 1))
+      // Same end state, reached through several extra revision bumps.
+      churned.setTile(Coord3(5, 5, 0), Tile(type: .floor, designation: .dig))
+      churned.modifyTile(Coord3(5, 5, 0)) { $0.designation = .none }
+
+      expect(
+        churned.blockContentRevision(at: Coord3(5, 5, 0))
+          > direct.blockContentRevision(at: Coord3(5, 5, 0)),
+        "the churned map should have taken more revisions to reach the same tiles")
+      expectEqual(direct.stateHash, churned.stateHash, "different history, same tiles, same hash")
+    }
+
     test("ASCII rendering shows what is there") {
       let map = MapStore(size: Coord3(8, 3, 1))
       map.fill(Region3(origin: Coord3(2, 1, 0), size: Coord3(4, 1, 1)), with: Tile(type: .floor))

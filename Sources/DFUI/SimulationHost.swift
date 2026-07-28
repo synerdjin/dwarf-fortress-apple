@@ -26,6 +26,10 @@ import Foundation
 public final class SimulationHost: @unchecked Sendable {
   private let fortress: Fortress
   public let ring: FrameSnapshotRing
+  /// Persistent across ticks so unchanged blocks are copied, not recomputed —
+  /// this is what makes PC-002 hold at every viewport size (docs/state.md).
+  /// Simulation-thread only, like everything else in this section.
+  private let snapshotCache = SnapshotCache()
 
   private let lock = NSLock()
   private var inbox: [Command] = []
@@ -102,7 +106,9 @@ public final class SimulationHost: @unchecked Sendable {
     // which makes that check fail every tick and defeats both mechanisms. At a
     // 300x200 camera that was ~2.8 MiB allocated, zero-filled, overwritten and
     // freed per tick.
-    ring.publish { fortress.buildSnapshot(camera: currentCamera, tileset: .ascii, into: &$0) }
+    ring.publish {
+      fortress.buildSnapshot(camera: currentCamera, tileset: .ascii, into: &$0, cache: snapshotCache)
+    }
     return true
   }
 
@@ -138,9 +144,9 @@ public final class SimulationHost: @unchecked Sendable {
   /// The recorded command stream, for writing a replay fixture.
   ///
   /// Exposed so `dfsim ui-session` can drive this host rather than
-  /// re-implementing `stepOnce()`. That matters beyond tidiness: the snapshot
-  /// path is going to change when per-block dirty-flag reuse lands, and a
-  /// fixture or bench that hand-rolled the loop would keep exercising the code
-  /// that was replaced.
+  /// re-implementing `stepOnce()`. That matters beyond tidiness: `stepOnce()`
+  /// is what runs the snapshot cache (`snapshotCache` above), and a fixture or
+  /// bench that hand-rolled the loop would exercise different code from what
+  /// actually runs in the window.
   public var recording: [TimedCommand] { fortress.commands.recording }
 }

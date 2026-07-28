@@ -90,14 +90,51 @@ recorded rather than quietly absorbed:
      exist to avoid exactly that. Fixing it removed ~0.19 ms/tick at 300×200.
      It did **not** change the conclusion: 2.48 → 2.29 is still 2.3× over.
 
-**Not fixed here, deliberately.** The dirty-flag reuse cannot be built on the
-existing `Block.dirty`: review §4.3 establishes that flag is renderer-owned and
-cannot be reused for this, so a correct fix needs the sim-owned dirty bits of
-P1 backlog item 9 — which is scheduled before the M3 spec freeze and is not M1
-phase 5 work. Both budgets are gated in `Scripts/ci.sh` as 3× tripwires on
-today's measurements so the position cannot silently worsen while item 9 is
-scheduled. **Owner decision needed** on whether PC-002 is amended, or item 9 is
-pulled forward, or M1 closes with the gap recorded.
+**Was not fixed here; fixed below.** The dirty-flag reuse could not be built on
+the existing `Block.dirty`: review §4.3 establishes that flag is renderer-owned
+and cannot be reused for this, so a correct fix needed the sim-owned dirty bits
+of P1 backlog item 9. Both budgets were gated in `Scripts/ci.sh` as 3× tripwires
+on the measurements above so the position could not silently worsen while item
+9 was scheduled.
+
+## Phase 4–5 resolution (2026-07-27, later same day)
+
+**Owner decision: pull item 9 forward, scoped to the dirty-bit/snapshot-gating
+slice only** (not the temperature-out-of-`Tile` split, not per-block cached
+hash digests — both remain scheduled, un-hash-affecting M3 work).
+
+`MapStore` gained a sim-owned, monotonic per-block `contentRevision`
+(`MapStore.swift`), and `Tileset.swift` gained `SnapshotCache` plus a
+`buildSnapshot(camera:tileset:into:cache:)` overload that skips recomputing any
+slot whose block's revision is unchanged since the cache last saw it, and
+invalidates the whole cache on a camera change. `SimulationHost` owns one and
+passes it every tick — the exact path both PC-002 benches measure. Detail and
+the full design rationale: plan.md's amended Cost Control paragraph.
+
+Not hash-affecting: `contentRevision` is never combined into `Fortress.hash`,
+and the un-cached `buildSnapshot(camera:tileset:into:)` overload (used by
+`dfsim shot`, `RenderTests`, and every other existing caller) is untouched —
+only `SimulationHost`'s call site changed.
+
+First version checked the revision once per tile. That worked at 144×144 but
+left 300×200 at a coin-flip margin against PC-002's 1.0 budget (0.93–1.02
+ms/tick, one sample over 1.0 under real load) — a real 2.3x win, not a solid
+fix. Block-chunking the check (once per 16-wide run of columns, aligned to the
+block boundary in world-x, instead of once per column — plan.md's Cost Control
+paragraph has the detail) cut it a further ~4-5x. Remeasured, same method as
+above (Apple M4, `--with-snapshot` against the same run without, ten runs
+each):
+
+| viewport | total ms/tick | baseline | snapshot delta | PC-002 (< 1 ms) |
+|---|---|---|---|---|
+| 144×144 (200-dwarves) | ~0.17–0.23 | ~0.095 | **0.070–0.134** | passes, ~8-14x under |
+| 300×200 (render-300x200, PC-001's own scale) | ~0.52 | ~0.30 | **0.214–0.218** | passes, ~4.6x under |
+
+PC-001 and PC-002 are now jointly satisfiable with real headroom at both
+scales, not merely at 144×144. `Scripts/ci.sh` gates both as 3× tripwires on
+these numbers (0.5 / 0.8), pending the first hosted-runner reading on this
+change — same interim-then-tighten convention the gates have used throughout
+this file.
 
 ## Deviations from plan.md
 
