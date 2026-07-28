@@ -53,10 +53,26 @@ swift run dfsim replay Fixtures/replays/smoke.rec --assert-hashes
 swift run dfsim determinism-check              # defaults to --threads 1,2,3,7,16,64
 swift run dfsim bench --scenario 200-dwarves --ticks 10000
 swift run dfsim ascii --tick 500 --z 12          # read game state with no GUI
+Scripts/window-shot.sh out/window.png            # look at the actual window
+DF_FRAME_LOG=1 swift run dwarffortress           # is it drawing? prints fps
 ```
 
 `ascii` is how you *look at* the game. Use it. A change that "should work" and a
 change you have watched produce the right tiles are different things.
+
+**The window needs looking at too, and it does not check itself.** Three window
+bugs shipped past a fully green `ci.sh` in one session — a viewport sized off by
+the backing scale factor, a blank window caused by running a run loop in a mode
+that cannot be run, and a dead display-link property. Every one left the process
+alive, silent, and passing every gate; the blank one merely used *less* CPU,
+which reads as an optimization succeeding. All three were caught by a human
+sending a screenshot.
+
+So: `Scripts/window-shot.sh` captures the window to a PNG you can read (needs
+Screen Recording permission, not Accessibility), and `DF_FRAME_LOG=1` makes
+"is it drawing" a number on stderr instead of a thing only eyes can settle.
+Neither is a substitute for the other — the frame counter says frames are being
+presented, the screenshot says they are the right frames.
 
 ## Determinism rules for parallel code
 
