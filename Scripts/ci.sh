@@ -169,14 +169,11 @@ swift run -c release dfsim bench --scenario 200-dwarves --ticks 5000 \
 # Comfortably inside PC-002's 1.0 budget with real headroom now, not a thin
 # margin.
 #
-# No fresh hosted-runner number for the fixed code yet -- this PR's own CI run
-# will be the first. Following this file's established practice (the 300x200
-# gate below started the same way, padded from a local estimate before hosted
-# data existed, then tightened as real hosted numbers came in): 3x the worst
-# local reading, rounded up, as an interim tripwire pending that first hosted
-# run. Tighten again once it lands.
+# PR #9's own hosted run (2026-07-28): 0.1756 ms/tick -- close to local's
+# worst (0.134) but higher, as this file's every prior hosted measurement has
+# been. 3x that, rounded up, replacing the interim local-only estimate.
 swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
-  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 0.5 \
+  --with-snapshot --width 144 --height 144 --snapshot-budget-ms 0.55 \
   || fail "PC-002: snapshot publication regressed past its CI tolerance at 144x144"
 
 # PC-001's own viewport. Before this fix, 300x200 on the larger
@@ -198,11 +195,11 @@ swift run -c release dfsim bench --scenario 200-dwarves --ticks 3000 \
 #            viewport means more per-row block-boundary crossings for the
 #            naive per-tile check to pay for individually.
 #
-# No hosted number yet for the fixed code; same interim-tripwire reasoning as
-# above -- 3x the worst local reading, rounded up, pending the first hosted
-# run on this exact change.
+# PR #9's own hosted run (2026-07-28): 0.4418 ms/tick -- solidly under the
+# 1.0 budget this time, unlike the pre-optimization near-miss (docs/state.md).
+# 3x that, rounded up, replacing the interim local-only estimate.
 swift run -c release dfsim bench --scenario render-300x200 --ticks 2000 \
-  --with-snapshot --snapshot-budget-ms 0.8 \
+  --with-snapshot --snapshot-budget-ms 1.4 \
   || fail "render-300x200 snapshot cost regressed past its CI tripwire"
 
 printf '\n\033[32mAll gates passed.\033[0m\n'

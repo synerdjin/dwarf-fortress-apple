@@ -99,8 +99,12 @@ before re-blessing. When parallel agents exist, split this table.
   0.214–0.218 at 300×200** — both comfortably under budget now, PC-001's own
   viewport included. Detail: `specs/001-metal-tilemap-renderer/plan.md`'s
   amended Cost Control paragraph and `tasks.md`'s Phase 4–5 resolution section.
-  `Scripts/ci.sh`'s two snapshot gates are retightened to 0.5/0.8 ms/tick (3×
-  local, interim pending this branch's first hosted CI run).
+  PR #9's hosted CI run (2026-07-28) confirmed it: **0.1756 ms/tick at
+  144×144, 0.4418 at 300×200** — higher than local, as every prior hosted
+  reading in this file has been, but solidly under the 1.0 budget at both
+  scales this time, unlike the pre-optimization near-miss. `Scripts/ci.sh`'s
+  two snapshot gates are retightened to 0.55/1.4 ms/tick (3× the worst of
+  local/hosted, matching this file's own convention).
 
 - 2026-07-27: **M1 phases 4–5 complete** (T011–T017). New `DFUI` target that
   deliberately cannot import `DFECS`, so Constitution III is enforced by the

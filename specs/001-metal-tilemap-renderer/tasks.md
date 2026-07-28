@@ -139,10 +139,11 @@ each):
 | 300×200 (render-300x200, PC-001's own scale) | ~0.52 | ~0.30 | **0.214–0.218** | passes, ~4.6x under |
 
 PC-001 and PC-002 are now jointly satisfiable with real headroom at both
-scales, not merely at 144×144. `Scripts/ci.sh` gates both as 3× tripwires on
-these numbers (0.5 / 0.8), pending the first hosted-runner reading on this
-change — same interim-then-tighten convention the gates have used throughout
-this file.
+scales, not merely at 144×144. PR #9's hosted CI run (2026-07-28) confirmed
+it: 0.1756 ms/tick at 144×144, 0.4418 at 300×200 — higher than local as ever,
+solidly under 1.0 at both scales. `Scripts/ci.sh` gates both at 3× the worst
+of local/hosted (0.55 / 1.4), the same convention the gates have used
+throughout this file.
 
 ## Deviations from plan.md
 
